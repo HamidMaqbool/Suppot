@@ -85,7 +85,12 @@ export default function TicketDetailView({ portal }: Props) {
   const [isNewTicketOpen, setIsNewTicketOpen] = useState(false);
   const [newTicket, setNewTicket] = useState({ subject: '', category: 'Technical', message: '' });
   
+  const [hasMore, setHasMore] = useState(true);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+  const messageRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+  
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollTopRef = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const socket = getSocket();
   const typingTimeoutRef = useRef<NodeJS.Timeout|null>(null);
@@ -120,12 +125,13 @@ export default function TicketDetailView({ portal }: Props) {
         }
 
         // Fetch Messages
-        const messagesRes = await fetch(`/api/tickets/${id}/messages`, {
+        const messagesRes = await fetch(`/api/tickets/${id}/messages?limit=50`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (messagesRes.ok) {
           const messagesData = await messagesRes.json();
           setMessages(messagesData);
+          if (messagesData.length < 50) setHasMore(false);
         }
 
         // Fetch Tags
@@ -212,6 +218,74 @@ export default function TicketDetailView({ portal }: Props) {
       scrollRef.current.scrollTo(scrollOptions);
     }
   }, [messages, isLoading]);
+
+  const handleScroll = async (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (target.scrollTop === 0 && hasMore && !isFetchingMore && messages.length > 0) {
+      setIsFetchingMore(true);
+      const firstMsg = messages[0];
+      scrollTopRef.current = target.scrollHeight;
+
+      try {
+        const res = await fetch(`/api/tickets/${id}/messages?limit=50&before=${firstMsg.createdAt}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const olderMessages = await res.json();
+          if (olderMessages.length < 50) setHasMore(false);
+          setMessages(prev => [...olderMessages, ...prev]);
+        }
+      } catch (err) {
+        console.error('Failed to load older messages:', err);
+      } finally {
+        setIsFetchingMore(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (scrollRef.current && scrollTopRef.current > 0 && isFetchingMore === false) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight - scrollTopRef.current;
+      scrollTopRef.current = 0;
+    }
+  }, [messages, isFetchingMore]);
+
+  const scrollToMessage = async (messageId: string) => {
+    const element = messageRefs.current[messageId];
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      element.classList.add('ring-2', 'ring-primary', 'ring-offset-2');
+      setTimeout(() => element.classList.remove('ring-2', 'ring-primary', 'ring-offset-2'), 2000);
+    } else if (hasMore) {
+      toast.loading('Loading conversation history...', { id: 'loading-history' });
+      setIsFetchingMore(true);
+      const firstMsg = messages[0];
+      try {
+        const res = await fetch(`/api/tickets/${id}/messages?limit=100&before=${firstMsg.createdAt}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const olderMessages = await res.json();
+          if (olderMessages.length < 100) setHasMore(false);
+          const newMessages = [...olderMessages, ...messages];
+          setMessages(newMessages);
+          
+          // Try again after state update
+          setTimeout(() => {
+            toast.dismiss('loading-history');
+            scrollToMessage(messageId);
+          }, 100);
+        }
+      } catch (err) {
+        toast.dismiss('loading-history');
+        console.error('Failed to jump to message:', err);
+      } finally {
+        setIsFetchingMore(false);
+      }
+    } else {
+      toast.error('Could not find original message');
+    }
+  };
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() && attachments.length === 0) return;
@@ -508,8 +582,20 @@ export default function TicketDetailView({ portal }: Props) {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-6 py-8 scroll-smooth" ref={scrollRef}>
+        <div 
+          className="flex-1 overflow-y-auto px-6 py-8 scroll-smooth" 
+          ref={scrollRef}
+          onScroll={handleScroll}
+        >
           <div className="max-w-4xl mx-auto space-y-8 pb-10">
+            {hasMore && (
+              <div className="flex justify-center p-4">
+                <Button variant="ghost" size="sm" className="text-slate-400 text-[10px] font-bold uppercase tracking-widest" disabled={isFetchingMore}>
+                  {isFetchingMore ? <Loader2 size={12} className="animate-spin mr-2" /> : null}
+                  {isFetchingMore ? 'Loading History...' : 'Scroll up to load history'}
+                </Button>
+              </div>
+            )}
             <div className="flex gap-4">
                <Avatar className="w-10 h-10 border-2 border-white shadow-sm ring-1 ring-slate-200">
                  <AvatarImage src={requestor.avatar} />
@@ -536,15 +622,19 @@ export default function TicketDetailView({ portal }: Props) {
               {messages.map((msg) => {
                 const isMe = (msg.senderId === user?.id);
                 const sender = MOCK_USERS.find(u => u.id === msg.senderId) || (isMe ? user : { name: portal === 'user' ? 'Support' : 'Customer', avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${msg.senderId}` });
+                
                 const replyTo = msg.replyToId ? messages.find(m => m.id === msg.replyToId) : null;
                 const replySender = replyTo ? (MOCK_USERS.find(u => u.id === replyTo.senderId) || { name: 'User' }) : null;
+                const replyToContent = replyTo?.content;
+                const replyToId = msg.replyToId;
                 
                 return (
                   <motion.div 
                     key={msg.id}
+                    ref={el => messageRefs.current[msg.id] = el}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className={`flex gap-4 group ${isMe ? 'flex-row-reverse' : ''}`}
+                    className={`flex gap-4 group transition-all duration-500 rounded-3xl p-2 ${isMe ? 'flex-row-reverse' : ''}`}
                   >
                     <Avatar className="w-10 h-10 border-2 border-white shadow-sm ring-1 ring-slate-200 shrink-0 self-end mb-2">
                       <AvatarImage src={sender?.avatar} />
@@ -557,11 +647,19 @@ export default function TicketDetailView({ portal }: Props) {
                       </div>
                       
                       <div className="relative">
-                        {replyTo && (
-                          <div className={`text-xs p-3 mb-2 bg-slate-100 border-l-4 border-slate-300 text-slate-500 italic rounded-md ${isMe ? 'text-right' : 'text-left'}`}>
-                             <div className="font-bold not-italic text-[10px] uppercase mb-1">{replySender?.name}</div>
-                             <div className="line-clamp-1">{replyTo.content}</div>
-                          </div>
+                        {replyToId && (
+                          <button 
+                            onClick={() => scrollToMessage(msg.replyToId!)}
+                            className={`w-full text-left cursor-pointer group/reply ${isMe ? 'text-right' : 'text-left'}`}
+                          >
+                            <div className={`text-xs p-3 mb-2 bg-slate-100 border-l-4 border-slate-300 text-slate-500 italic rounded-md transition-colors group-hover/reply:bg-slate-200`}>
+                               <div className="font-bold not-italic text-[10px] uppercase mb-1 flex items-center gap-1">
+                                 <MessageSquareQuote size={10} className="text-slate-400" />
+                                 {replySender?.name}
+                               </div>
+                               <div className="line-clamp-1">{replyToContent || "Original message"}</div>
+                            </div>
+                          </button>
                         )}
                         <div className={`p-4 rounded-2xl text-sm leading-relaxed relative ${
                           isMe 
@@ -707,27 +805,40 @@ export default function TicketDetailView({ portal }: Props) {
         </div>
 
         {ticket?.status === 'resolved' ? (
-          <div className="p-12 text-center bg-slate-50/50 flex flex-col items-center justify-center space-y-4 shrink-0 border-t border-slate-200">
-            <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-2">
-              <CheckCircle2 size={32} />
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-lg font-bold text-slate-900">Ticket Resolved</h3>
-              <p className="text-sm text-slate-500 max-w-xs mx-auto">
-                {ticket.rating 
-                  ? "The customer has provided feedback for this ticket." 
-                  : "Waiting for the customer to provide feedback on this case."}
-              </p>
-            </div>
-            {portal === 'admin' && (
-              <Button 
-                variant="outline"
-                onClick={handleReopenTicket}
-                className="mt-4 border-slate-200 text-slate-600 rounded-xl font-bold text-xs uppercase tracking-widest px-8 h-10 hover:bg-slate-100 transition-all"
-              >
-                Re-open Ticket
-              </Button>
-            )}
+          <div className="p-8 bg-white border-t border-slate-200 z-10 shrink-0">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="mx-auto max-w-md bg-white border border-slate-100 rounded-3xl p-8 shadow-sm flex flex-col items-center text-center space-y-6"
+            >
+              <div className="w-16 h-16 bg-green-100 text-green-600 rounded-2xl flex items-center justify-center">
+                <CheckCircle2 size={32} />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-lg font-bold text-slate-900 tracking-tight">Ticket Resolved</h3>
+                <p className="text-xs text-slate-500 max-w-xs leading-relaxed font-medium">
+                  {ticket.rating 
+                    ? `Feedback: "${ticket.feedback}"` 
+                    : "Waiting for the customer to provide feedback on this case."}
+                </p>
+                {ticket.rating && (
+                  <div className="flex justify-center gap-1 mt-2">
+                    {[1, 2, 3, 4, 5].map(s => (
+                      <Star key={s} size={16} fill={s <= ticket.rating! ? '#fbbf24' : 'none'} className={s <= ticket.rating! ? 'text-yellow-400' : 'text-slate-200'} />
+                    ))}
+                  </div>
+                )}
+              </div>
+              {portal === 'admin' && (
+                <Button 
+                  variant="outline"
+                  onClick={handleReopenTicket}
+                  className="w-full h-11 border-slate-200 text-slate-600 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all font-mono"
+                >
+                  Re-open Ticket
+                </Button>
+              )}
+            </motion.div>
           </div>
         ) : (
           <div className="p-6 bg-white border-t border-slate-200 z-10 shrink-0">

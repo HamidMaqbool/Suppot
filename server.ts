@@ -133,9 +133,20 @@ async function initializeDatabase(db: mysql.Pool) {
         ticketId VARCHAR(36) NOT NULL,
         senderId VARCHAR(36) NOT NULL,
         content TEXT,
+        replyToId VARCHAR(36),
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // Migration for messages
+    try {
+      await db.query('ALTER TABLE messages ADD COLUMN replyToId VARCHAR(36)');
+      console.log('Added replyToId column to messages table.');
+    } catch (err: any) {
+      if (err.code !== 'ER_DUP_FIELDNAME' && err.errno !== 1060) {
+        console.error('Migration error (replyToId):', err);
+      }
+    }
 
     // Create Attachments Table
     await db.query(`
@@ -466,14 +477,28 @@ app.get('/api/tickets/:id', authenticateJWT, async (req: any, res) => {
   res.status(404).json({ message: 'Not found in demo mode' });
 });
 
-// List Messages API
 app.get('/api/tickets/:id/messages', authenticateJWT, async (req: any, res) => {
   const { id } = req.params;
+  const limit = parseInt(req.query.limit as string) || 50;
+  const before = req.query.before as string; // Timestamp for pagination
+
   const db = await getDb();
   if (db) {
     try {
-      const [rows] = await db.query('SELECT * FROM messages WHERE ticketId = ? ORDER BY createdAt ASC', [id]);
-      return res.json(rows);
+      let query = 'SELECT * FROM messages WHERE ticketId = ?';
+      const params: any[] = [id];
+
+      if (before) {
+        query += ' AND createdAt < ?';
+        params.push(new Date(before));
+      }
+
+      query += ' ORDER BY createdAt DESC LIMIT ?';
+      params.push(limit);
+
+      const [rows]: any = await db.query(query, params);
+      // Return in chronological order for the client
+      return res.json(rows.reverse());
     } catch (err) {
       console.error('Database list messages error:', err);
       return res.status(500).json({ message: 'Internal server error' });
@@ -734,8 +759,8 @@ io.on('connection', (socket) => {
     if (db) {
       try {
         await db.query(
-          'INSERT INTO messages (id, ticketId, senderId, content, createdAt) VALUES (?, ?, ?, ?, ?)',
-          [message.id, message.ticketId, message.senderId, message.content, new Date(message.createdAt)]
+          'INSERT INTO messages (id, ticketId, senderId, content, replyToId, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+          [message.id, message.ticketId, message.senderId, message.content, message.replyToId || null, new Date(message.createdAt)]
         );
       } catch (err) {
         console.error('Failed to persist message via socket:', err);
