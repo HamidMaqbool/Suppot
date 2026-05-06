@@ -213,11 +213,11 @@ export default function TicketDetailView({ portal }: Props) {
     if (scrollRef.current) {
       const scrollOptions: ScrollToOptions = {
         top: scrollRef.current.scrollHeight,
-        behavior: messages.length <= 5 ? 'auto' : 'smooth'
+        behavior: (messages.length <= 5 && !isLoading) ? 'auto' : 'smooth'
       };
       scrollRef.current.scrollTo(scrollOptions);
     }
-  }, [messages, isLoading]);
+  }, [messages, isLoading, ticket?.status, ticket?.rating]);
 
   const handleScroll = async (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
