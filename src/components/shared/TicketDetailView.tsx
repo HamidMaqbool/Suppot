@@ -189,9 +189,9 @@ export default function TicketDetailView({ portal }: Props) {
       }
     });
 
-    socket.on('ticket-status-updated', ({ id: statusTicketId, status }) => {
+    socket.on('ticket-status-updated', ({ id: statusTicketId, status, rating, feedback }) => {
       if (statusTicketId === id) {
-        setTicket(prev => prev ? { ...prev, status } : null);
+        setTicket(prev => prev ? { ...prev, status, rating: rating !== undefined ? rating : prev.rating, feedback: feedback !== undefined ? feedback : prev.feedback } : null);
         if (status === 'resolved') playSound();
       }
     });
@@ -380,7 +380,7 @@ export default function TicketDetailView({ portal }: Props) {
 
       if (res.ok) {
         toast.success('Ticket reopened');
-        setTicket(prev => prev ? { ...prev, status: 'open' } : null);
+        setTicket(prev => prev ? { ...prev, status: 'open', rating: null, feedback: null } : null);
       } else {
         const errorData = await res.json();
         toast.error(errorData.message || 'Failed to reopen ticket');

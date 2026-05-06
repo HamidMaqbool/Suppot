@@ -613,8 +613,8 @@ app.patch('/api/tickets/:id/reopen', authenticateJWT, async (req: any, res) => {
         return res.status(400).json({ message: 'Cannot reopen ticket after feedback or if not resolved' });
       }
 
-      await db.query('UPDATE tickets SET status = "open" WHERE id = ?', [id]);
-      io.emit('ticket-status-updated', { id, status: 'open' });
+      await db.query('UPDATE tickets SET status = "open", rating = NULL, feedback = NULL WHERE id = ?', [id]);
+      io.emit('ticket-status-updated', { id, status: 'open', rating: null, feedback: null });
       return res.json({ message: 'Ticket reopened successfully' });
     } catch (err) {
       console.error('Database reopen error:', err);
