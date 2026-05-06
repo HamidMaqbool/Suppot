@@ -582,7 +582,7 @@ app.post('/api/tickets/:id/feedback', authenticateJWT, async (req: any, res) => 
       }
 
       await db.query('UPDATE tickets SET rating = ?, feedback = ?, status = "resolved" WHERE id = ?', [rating, feedback, id]);
-      io.emit('ticket-status-updated', { id, status: 'resolved' });
+      io.emit('ticket-status-updated', { id, status: 'resolved', rating, feedback });
       return res.json({ message: 'Feedback submitted successfully. Ticket remains resolved.' });
     } catch (err) {
       console.error('Database feedback error:', err);
