@@ -672,32 +672,40 @@ export default function TicketDetailView({ portal }: Props) {
                      <Trash2 size={18} />
                    </Button>
                  </DialogTrigger>
-                 <DialogContent className="bg-white border-0 shadow-2xl rounded-[32px] sm:max-w-[400px]">
-                   <DialogHeader className="items-center text-center space-y-4">
-                     <div className="w-16 h-16 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center">
-                       <AlertCircle size={32} />
-                     </div>
-                     <div className="space-y-1">
-                       <DialogTitle className="text-xl font-bold">Delete Ticket?</DialogTitle>
-                       <DialogDescription className="text-slate-500">
-                         This will permanently delete this ticket, all its messages, and any attached files. This action cannot be undone.
-                       </DialogDescription>
-                     </div>
-                   </DialogHeader>
-                   <DialogFooter className="sm:justify-center gap-2 mt-4">
-                     <Button variant="ghost" onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeleting} className="rounded-xl px-8 h-12">
-                       Cancel
-                     </Button>
-                     <Button 
-                       onClick={handleDeleteTicket} 
-                       disabled={isDeleting}
-                       className="bg-red-600 hover:bg-red-700 text-white rounded-xl px-8 h-12 font-bold"
-                     >
-                       {isDeleting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                       Delete Permanently
-                     </Button>
-                   </DialogFooter>
-                 </DialogContent>
+                  <DialogContent className="bg-white border-0 shadow-2xl rounded-[32px] sm:max-w-[420px] p-0 overflow-hidden">
+                    <div className="bg-red-500 h-2 w-full" />
+                    <div className="p-8">
+                       <DialogHeader className="items-center text-center space-y-4">
+                         <div className="w-20 h-20 bg-red-50 text-red-600 rounded-[2rem] flex items-center justify-center shadow-inner">
+                           <Trash2 size={40} className="animate-pulse" />
+                         </div>
+                         <div className="space-y-2">
+                           <DialogTitle className="text-2xl font-black text-slate-900 tracking-tight">Delete Ticket?</DialogTitle>
+                           <DialogDescription className="text-slate-500 text-sm leading-relaxed font-medium">
+                             This will permanently remove <span className="font-bold text-slate-900 text-xs px-1.5 py-0.5 bg-slate-100 rounded">#{id}</span> and all associated 
+                             messages, attachments, and history. This action cannot be reversed.
+                           </DialogDescription>
+                         </div>
+                       </DialogHeader>
+                       <DialogFooter className="flex flex-col sm:flex-row gap-3 mt-8">
+                         <Button 
+                           variant="ghost" 
+                           onClick={() => setIsDeleteDialogOpen(false)} 
+                           disabled={isDeleting} 
+                           className="flex-1 rounded-2xl h-14 font-bold text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
+                         >
+                           Keep Ticket
+                         </Button>
+                         <Button 
+                           onClick={handleDeleteTicket} 
+                           disabled={isDeleting}
+                           className="flex-1 bg-red-600 hover:bg-red-700 text-white rounded-2xl h-14 font-black shadow-lg shadow-red-200 transition-all active:scale-95 flex items-center justify-center"
+                         >
+                           {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Delete Permanently"}
+                         </Button>
+                       </DialogFooter>
+                    </div>
+                  </DialogContent>
                </Dialog>
              )}
              

@@ -31,6 +31,14 @@ import { Input } from '@/components/ui/input';
 import { format } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { toast } from 'sonner';
+import { 
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from '@/components/ui/dialog';
 import { useAuth } from '../../lib/AuthContext';
 import { Ticket } from '../../types';
 
@@ -174,17 +182,17 @@ export default function AdminDashboard() {
     }
   };
 
+  const [deletingId, setDeletingId] = useState<number | string | null>(null);
+
   const handleDeleteTicket = async (ticketId: number | string) => {
-    const isConfirmed = window.confirm(`Permanently delete ticket #${ticketId}? This will remove all messages and files.`);
-    if (!isConfirmed) return;
-    
+    setIsLoading(true);
     try {
       const res = await fetch(`/api/tickets/${ticketId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
-        toast.success('Ticket and assets deleted');
+        toast.success(`Ticket #${ticketId} deleted`);
         setTickets(prev => prev.filter(t => t.id !== ticketId));
       } else {
         const data = await res.json();
@@ -193,6 +201,9 @@ export default function AdminDashboard() {
     } catch (err) {
       console.error('Delete error:', err);
       toast.error('Connection error');
+    } finally {
+      setIsLoading(false);
+      setDeletingId(null);
     }
   };
 
@@ -438,11 +449,36 @@ export default function AdminDashboard() {
                                     className="w-10 h-10 rounded-xl text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleDeleteTicket(ticket.id);
+                                      setDeletingId(ticket.id);
                                     }}
                                   >
                                      <Trash2 size={18} />
                                   </Button>
+
+                                  <Dialog open={deletingId === ticket.id} onOpenChange={(open) => !open && setDeletingId(null)}>
+                                    <DialogContent className="bg-white border-0 shadow-2xl rounded-[32px] sm:max-w-[400px] text-center p-8 overflow-hidden">
+                                       <div className="bg-red-500 h-1.5 w-full absolute top-0 left-0" />
+                                       <div className="w-20 h-20 bg-red-50 text-red-500 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-inner mt-4">
+                                          <Trash2 size={40} className="animate-pulse" />
+                                       </div>
+                                       <DialogTitle className="text-2xl font-black text-slate-900 mb-2 tracking-tight text-center">Delete Ticket?</DialogTitle>
+                                       <DialogDescription className="text-slate-500 mb-8 font-medium leading-relaxed text-center">
+                                         Permanently delete ticket <span className="text-slate-900 font-bold bg-slate-100 px-1.5 py-0.5 rounded">#{ticket.id}</span>? 
+                                         This will remove all associated history and assets.
+                                       </DialogDescription>
+                                       <div className="flex flex-col sm:flex-row gap-3">
+                                         <Button variant="ghost" onClick={() => setDeletingId(null)} className="flex-1 rounded-2xl h-14 font-bold text-slate-400">
+                                           Cancel
+                                         </Button>
+                                         <Button 
+                                           onClick={() => handleDeleteTicket(ticket.id)} 
+                                           className="flex-1 bg-red-600 hover:bg-red-700 text-white rounded-2xl h-14 font-black shadow-lg shadow-red-200"
+                                         >
+                                           Delete
+                                         </Button>
+                                       </div>
+                                    </DialogContent>
+                                  </Dialog>
                                 </div>
                              </div>
                           </motion.div>

@@ -79,6 +79,26 @@ async function getDb() {
 
 async function initializeDatabase(db: mysql.Pool) {
   try {
+    // Migration: Check if schema needs reset (if id is VARCHAR instead of INT)
+    try {
+      const [columns]: any = await db.query("SHOW COLUMNS FROM users LIKE 'id'");
+      if (columns.length > 0 && columns[0].Type.toLowerCase().includes('varchar')) {
+        console.log('Detected legacy schema (id is VARCHAR). Migrating to INT AUTO_INCREMENT...');
+        await db.query('SET FOREIGN_KEY_CHECKS = 0');
+        await db.query('DROP TABLE IF EXISTS ticket_tags');
+        await db.query('DROP TABLE IF EXISTS tags');
+        await db.query('DROP TABLE IF EXISTS attachments');
+        await db.query('DROP TABLE IF EXISTS messages');
+        await db.query('DROP TABLE IF EXISTS tickets');
+        await db.query('DROP TABLE IF EXISTS secure_links');
+        await db.query('DROP TABLE IF EXISTS users');
+        await db.query('SET FOREIGN_KEY_CHECKS = 1');
+        console.log('Legacy tables dropped. Recreating with INT AUTO_INCREMENT...');
+      }
+    } catch (migErr) {
+      console.log('No migration needed or table does not exist yet.');
+    }
+
     // Create Users Table
     await db.query(`
       CREATE TABLE IF NOT EXISTS users (
