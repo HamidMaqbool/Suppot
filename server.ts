@@ -537,6 +537,7 @@ app.patch('/api/tickets/:id/status', authenticateJWT, async (req: any, res) => {
   if (db) {
     try {
       await db.query('UPDATE tickets SET status = ? WHERE id = ?', [status, id]);
+      io.emit('ticket-status-updated', { id, status });
       return res.json({ message: `Ticket status updated to ${status}` });
     } catch (err) {
       console.error('Database status update error:', err);
@@ -563,6 +564,7 @@ app.post('/api/tickets/:id/feedback', authenticateJWT, async (req: any, res) => 
       }
 
       await db.query('UPDATE tickets SET rating = ?, feedback = ?, status = "resolved" WHERE id = ?', [rating, feedback, id]);
+      io.emit('ticket-status-updated', { id, status: 'resolved' });
       return res.json({ message: 'Feedback submitted successfully. Ticket remains resolved.' });
     } catch (err) {
       console.error('Database feedback error:', err);
@@ -594,6 +596,7 @@ app.patch('/api/tickets/:id/reopen', authenticateJWT, async (req: any, res) => {
       }
 
       await db.query('UPDATE tickets SET status = "open" WHERE id = ?', [id]);
+      io.emit('ticket-status-updated', { id, status: 'open' });
       return res.json({ message: 'Ticket reopened successfully' });
     } catch (err) {
       console.error('Database reopen error:', err);

@@ -27,6 +27,17 @@ import { MOCK_TICKETS, MOCK_MESSAGES, MOCK_USERS } from '../../constants';
 import { Message, Ticket } from '../../types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogTrigger,
+  DialogDescription,
+  DialogFooter
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
@@ -71,6 +82,8 @@ export default function TicketDetailView({ portal }: Props) {
   const [isFocused, setIsFocused] = useState(true);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [showAttachmentsSidebar, setShowAttachmentsSidebar] = useState(true);
+  const [isNewTicketOpen, setIsNewTicketOpen] = useState(false);
+  const [newTicket, setNewTicket] = useState({ subject: '', category: 'Technical', message: '' });
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -176,9 +189,17 @@ export default function TicketDetailView({ portal }: Props) {
       }
     });
 
+    socket.on('ticket-status-updated', ({ id: statusTicketId, status }) => {
+      if (statusTicketId === id) {
+        setTicket(prev => prev ? { ...prev, status } : null);
+        if (status === 'resolved') playSound();
+      }
+    });
+
     return () => {
       socket.off('message-received');
       socket.off('user-typing');
+      socket.off('ticket-status-updated');
     };
   }, [id, socket, user?.id]);
 
@@ -374,8 +395,94 @@ export default function TicketDetailView({ portal }: Props) {
 
   const requestor = MOCK_USERS.find(u => u.id === ticket.userId) || { name: 'Customer', avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${ticket.userId}`, email: 'customer@example.com' };
 
+  const handleCreateTicket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/tickets', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({
+          subject: newTicket.subject,
+          description: newTicket.message,
+          category: newTicket.category,
+          priority: 'medium'
+        })
+      });
+
+      if (res.ok) {
+        const created = await res.json();
+        toast.success('Support ticket created successfully!');
+        setIsNewTicketOpen(false);
+        setNewTicket({ subject: '', category: 'Technical', message: '' });
+        navigate(`/user/ticket/${created.id}`);
+      } else {
+        toast.error('Failed to create ticket');
+      }
+    } catch (err) {
+      console.error('Create ticket error:', err);
+      toast.error('Something went wrong');
+    }
+  };
+
   return (
     <div className="h-screen flex bg-white overflow-hidden">
+      <Dialog open={isNewTicketOpen} onOpenChange={setIsNewTicketOpen}>
+        <DialogContent className="sm:max-w-md bg-white border-0 shadow-2xl rounded-[32px]">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Open New Ticket</DialogTitle>
+            <DialogDescription className="text-slate-500">
+              Fill in the details below to reach out to our support specialists.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateTicket} className="space-y-6 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="subject" className="text-xs font-bold uppercase tracking-wider text-slate-400">Subject</Label>
+              <Input 
+                id="subject" 
+                placeholder="e.g., Issue with subscription plan" 
+                required 
+                className="h-12 rounded-xl bg-slate-50 border-0 focus-visible:ring-2 focus-visible:ring-primary/20"
+                value={newTicket.subject}
+                onChange={(e) => setNewTicket({...newTicket, subject: e.target.value})}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="category" className="text-xs font-bold uppercase tracking-wider text-slate-400">Category</Label>
+              <select 
+                id="category"
+                className="w-full h-12 rounded-xl bg-slate-50 border-0 px-3 text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                value={newTicket.category}
+                onChange={(e) => setNewTicket({...newTicket, category: e.target.value})}
+              >
+                <option>Technical</option>
+                <option>Billing</option>
+                <option>Account</option>
+                <option>Feature Request</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="message" className="text-xs font-bold uppercase tracking-wider text-slate-400">Message</Label>
+              <Textarea 
+                id="message" 
+                placeholder="Provide details about your request..." 
+                required 
+                className="min-h-[120px] rounded-xl bg-slate-50 border-0 focus-visible:ring-2 focus-visible:ring-primary/20 resize-none"
+                value={newTicket.message}
+                onChange={(e) => setNewTicket({...newTicket, message: e.target.value})}
+              />
+            </div>
+            <DialogFooter className="sm:justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setIsNewTicketOpen(false)} className="rounded-xl">Cancel</Button>
+              <Button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl px-6 gap-2">
+                Submit Ticket <Send size={16} />
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       <div className="flex-1 flex flex-col min-w-0 bg-slate-50/50">
         <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between z-20 shrink-0">
           <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -508,6 +615,32 @@ export default function TicketDetailView({ portal }: Props) {
               >
                  <Activity size={12} className="animate-pulse text-primary" /> 
                  {portal === 'user' ? 'Support Agent ' : 'Customer '} is typing...
+              </motion.div>
+            )}
+
+            {ticket.rating && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mx-auto max-w-md bg-white border border-slate-100 rounded-3xl p-6 shadow-sm flex flex-col items-center text-center space-y-4"
+              >
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map(s => (
+                    <Star key={s} size={20} fill={s <= ticket.rating ? '#fbbf24' : 'none'} className={s <= ticket.rating ? 'text-yellow-400' : 'text-slate-200'} />
+                  ))}
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-900 mb-1">Feedback Submitted</p>
+                  <p className="text-xs text-slate-500 italic">"{ticket.feedback}"</p>
+                </div>
+                {portal === 'user' && (
+                  <Button 
+                    onClick={() => setIsNewTicketOpen(true)}
+                    className="bg-primary text-white rounded-xl font-bold text-xs uppercase tracking-widest px-6"
+                  >
+                    Create New Ticket
+                  </Button>
+                )}
               </motion.div>
             )}
 

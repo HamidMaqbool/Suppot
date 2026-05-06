@@ -2,7 +2,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { 
   Plus, 
@@ -38,12 +38,21 @@ import { Ticket } from '../../types';
 
 export default function UserDashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { token } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isNewTicketOpen, setIsNewTicketOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [newTicket, setNewTicket] = useState({ subject: '', category: 'Technical', message: '' });
+
+  useEffect(() => {
+    if (location.state?.openNewTicket) {
+      setIsNewTicketOpen(true);
+      // Clean up state
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, navigate, location.pathname]);
 
   useEffect(() => {
     fetchTickets();
