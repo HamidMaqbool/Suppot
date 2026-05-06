@@ -3,7 +3,7 @@ export type TicketStatus = 'open' | 'pending' | 'resolved' | 'closed';
 export type TicketPriority = 'low' | 'medium' | 'high' | 'urgent';
 
 export interface User {
-  id: string;
+  id: number | string;
   name: string;
   email: string;
   avatar?: string;
@@ -11,24 +11,25 @@ export interface User {
 }
 
 export interface Message {
-  id: string;
-  ticketId: string;
-  senderId: string;
+  id: number | string;
+  ticketId: number | string;
+  senderId?: number | string;
   content?: string;
   createdAt: string;
   attachments?: string[];
-  replyToId?: string;
+  replyToId?: number | string;
+  isSystem?: boolean;
 }
 
 export interface Ticket {
-  id: string;
-  userId: string;
+  id: number | string;
+  userId: number | string;
   subject: string;
   description: string;
   status: TicketStatus;
   priority: TicketPriority;
   category: string;
-  assignedTo?: string;
+  assignedTo?: number | string;
   rating?: number;
   feedback?: string;
   createdAt: string;

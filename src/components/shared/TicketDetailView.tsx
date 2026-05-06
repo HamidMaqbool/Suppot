@@ -21,7 +21,10 @@ import {
   X,
   MessageSquareQuote,
   Activity,
-  Star
+  Star,
+  Trash2,
+  UserPlus,
+  ArrowRightLeft
 } from 'lucide-react';
 import { MOCK_TICKETS, MOCK_MESSAGES, MOCK_USERS } from '../../constants';
 import { Message, Ticket } from '../../types';
@@ -37,6 +40,12 @@ import {
   DialogDescription,
   DialogFooter
 } from '@/components/ui/dialog';
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -83,6 +92,8 @@ export default function TicketDetailView({ portal }: Props) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [showAttachmentsSidebar, setShowAttachmentsSidebar] = useState(true);
   const [isNewTicketOpen, setIsNewTicketOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [newTicket, setNewTicket] = useState({ subject: '', category: 'Technical', message: '' });
   
   const [hasMore, setHasMore] = useState(true);
@@ -92,6 +103,7 @@ export default function TicketDetailView({ portal }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTopRef = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const resolvedBoxRef = useRef<HTMLDivElement>(null);
   const socket = getSocket();
   const typingTimeoutRef = useRef<NodeJS.Timeout|null>(null);
 
@@ -210,7 +222,12 @@ export default function TicketDetailView({ portal }: Props) {
   }, [id, socket, user?.id]);
 
   useEffect(() => {
-    if (scrollRef.current) {
+    if (ticket?.status === 'resolved' && resolvedBoxRef.current) {
+      // Small delay to ensure layout is updated
+      setTimeout(() => {
+        resolvedBoxRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 100);
+    } else if (scrollRef.current) {
       const scrollOptions: ScrollToOptions = {
         top: scrollRef.current.scrollHeight,
         behavior: (messages.length <= 5 && !isLoading) ? 'auto' : 'smooth'
@@ -465,6 +482,75 @@ export default function TicketDetailView({ portal }: Props) {
     }
   };
 
+  const [admins, setAdmins] = useState<any[]>([]);
+  const [isAssigning, setIsAssigning] = useState(false);
+
+  useEffect(() => {
+    const fetchAdmins = async () => {
+      if (portal === 'admin' && token) {
+        try {
+          const res = await fetch('/api/admin/users?limit=100', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setAdmins(data.users.filter((u: any) => u.role === 'admin'));
+          }
+        } catch (err) {
+          console.error('Failed to fetch admins:', err);
+        }
+      }
+    };
+    fetchAdmins();
+  }, [portal, token]);
+
+  const handleAssignTicket = async (adminId: number) => {
+    setIsAssigning(true);
+    try {
+      const res = await fetch(`/api/tickets/${id}/assign`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ assignedTo: adminId })
+      });
+      if (res.ok) {
+        setTicket(prev => prev ? { ...prev, assignedTo: adminId } : null);
+        toast.success('Ticket assigned successfully');
+      } else {
+        toast.error('Failed to assign ticket');
+      }
+    } catch (err) {
+      toast.error('Connection error');
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  const handleDeleteTicket = async () => {
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/tickets/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        toast.success('Ticket deleted successfully');
+        navigate(portal === 'admin' ? '/admin' : '/portal');
+      } else {
+        const errorData = await res.json();
+        toast.error(errorData.message || 'Failed to delete ticket');
+      }
+    } catch (err) {
+      console.error('Delete error:', err);
+      toast.error('Connection error');
+    } finally {
+      setIsDeleting(false);
+      setIsDeleteDialogOpen(false);
+    }
+  };
+
   if (!ticket) return <div>Ticket not found</div>;
 
   const requestor = MOCK_USERS.find(u => u.id === ticket.userId) || { name: 'Customer', avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${ticket.userId}`, email: 'customer@example.com' };
@@ -566,7 +652,7 @@ export default function TicketDetailView({ portal }: Props) {
             <div className="h-6 w-[1px] bg-slate-200" />
             <div className="flex-1 min-w-0">
                <div className="flex items-center gap-2">
-                 <span className="text-xs font-bold text-slate-400 font-mono tracking-tighter">#{ticket.id}</span>
+                 <span className="text-xs font-bold text-slate-400 font-mono tracking-tighter">#{id}</span>
                  <h1 className="text-sm font-bold text-slate-900 truncate">{ticket.subject}</h1>
                </div>
                <p className="text-[10px] text-slate-500 flex items-center gap-1">
@@ -578,7 +664,44 @@ export default function TicketDetailView({ portal }: Props) {
              <Button variant="outline" size="sm" className="hidden sm:flex rounded-lg border-slate-200 gap-2 h-9" onClick={() => toast.info('Support docs requested')}>
                 <ShieldAlert size={14} className="text-slate-400" /> Need Help?
              </Button>
-             <Button variant="ghost" size="icon" className="rounded-lg h-9 w-9"><MoreHorizontal size={18} /></Button>
+
+             {portal === 'admin' && (
+               <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                 <DialogTrigger asChild>
+                   <Button variant="ghost" size="icon" className="rounded-lg h-9 w-9 text-slate-400 hover:text-red-600 hover:bg-red-50">
+                     <Trash2 size={18} />
+                   </Button>
+                 </DialogTrigger>
+                 <DialogContent className="bg-white border-0 shadow-2xl rounded-[32px] sm:max-w-[400px]">
+                   <DialogHeader className="items-center text-center space-y-4">
+                     <div className="w-16 h-16 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center">
+                       <AlertCircle size={32} />
+                     </div>
+                     <div className="space-y-1">
+                       <DialogTitle className="text-xl font-bold">Delete Ticket?</DialogTitle>
+                       <DialogDescription className="text-slate-500">
+                         This will permanently delete this ticket, all its messages, and any attached files. This action cannot be undone.
+                       </DialogDescription>
+                     </div>
+                   </DialogHeader>
+                   <DialogFooter className="sm:justify-center gap-2 mt-4">
+                     <Button variant="ghost" onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeleting} className="rounded-xl px-8 h-12">
+                       Cancel
+                     </Button>
+                     <Button 
+                       onClick={handleDeleteTicket} 
+                       disabled={isDeleting}
+                       className="bg-red-600 hover:bg-red-700 text-white rounded-xl px-8 h-12 font-bold"
+                     >
+                       {isDeleting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                       Delete Permanently
+                     </Button>
+                   </DialogFooter>
+                 </DialogContent>
+               </Dialog>
+             )}
+             
+             <Button variant="ghost" size="icon" className="rounded-lg h-9 w-9 text-slate-400"><MoreHorizontal size={18} /></Button>
           </div>
         </header>
 
@@ -620,13 +743,28 @@ export default function TicketDetailView({ portal }: Props) {
 
             <AnimatePresence initial={false}>
               {messages.map((msg) => {
+                if (msg.isSystem) {
+                  return (
+                    <motion.div 
+                      key={msg.id}
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex justify-center"
+                    >
+                      <div className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-full text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <Activity size={12} className="text-primary/50" />
+                        {msg.content}
+                      </div>
+                    </motion.div>
+                  );
+                }
+
                 const isMe = (msg.senderId === user?.id);
-                const sender = MOCK_USERS.find(u => u.id === msg.senderId) || (isMe ? user : { name: portal === 'user' ? 'Support' : 'Customer', avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${msg.senderId}` });
-                
-                const replyTo = msg.replyToId ? messages.find(m => m.id === msg.replyToId) : null;
-                const replySender = replyTo ? (MOCK_USERS.find(u => u.id === replyTo.senderId) || { name: 'User' }) : null;
-                const replyToContent = replyTo?.content;
+                const sender = MOCK_USERS.find(u => u.id === msg.senderId) || admins.find(a => a.id === msg.senderId);
                 const replyToId = msg.replyToId;
+                const replyMsg = messages.find(m => m.id === msg.replyToId);
+                const replyToContent = replyMsg?.content;
+                const replySender = replyMsg ? (MOCK_USERS.find(u => u.id === replyMsg.senderId) || admins.find(a => a.id === replyMsg.senderId)) : null;
                 
                 return (
                   <motion.div 
@@ -718,26 +856,27 @@ export default function TicketDetailView({ portal }: Props) {
 
             {ticket?.status === 'resolved' && (
               <motion.div 
+                ref={resolvedBoxRef}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mx-auto max-w-lg bg-white border border-slate-200 rounded-[2.5rem] p-8 text-center shadow-xl shadow-slate-200/50 my-12"
+                className="mx-auto max-w-md bg-white border border-slate-200 rounded-[2rem] p-6 text-center shadow-xl shadow-slate-200/50 my-8"
               >
                 {portal === 'user' && !ticket.rating ? (
                   <>
-                    <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                       <Star size={32} fill="currentColor" />
+                    <div className="w-12 h-12 bg-yellow-50 text-yellow-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                       <Star size={24} fill="currentColor" />
                     </div>
-                    <h3 className="text-xl font-black text-slate-900 mb-2 tracking-tight">Rate your experience</h3>
-                    <p className="text-slate-500 text-sm mb-8 font-medium">How helpful was our response today?</p>
+                    <h3 className="text-lg font-bold text-slate-900 mb-1 tracking-tight">Rate your experience</h3>
+                    <p className="text-slate-400 text-xs mb-5 font-medium">How helpful was our response today?</p>
                     
-                    <div className="flex justify-center gap-2 mb-8 py-4">
+                    <div className="flex justify-center gap-2 mb-6 py-2">
                       {[1, 2, 3, 4, 5].map(star => (
                         <button 
                           key={star}
                           onClick={() => setRating(star)}
-                          className={`w-12 h-12 rounded-2xl transition-all duration-300 transform hover:scale-110 flex items-center justify-center ${rating >= star ? 'bg-yellow-400 text-white shadow-lg shadow-yellow-200' : 'bg-slate-50 text-slate-300 hover:bg-slate-100'}`}
+                          className={`w-10 h-10 rounded-xl transition-all duration-300 transform hover:scale-110 flex items-center justify-center ${rating >= star ? 'bg-yellow-400 text-white shadow-lg shadow-yellow-200' : 'bg-slate-50 text-slate-300 hover:bg-slate-100'}`}
                         >
-                          <Star size={24} fill={rating >= star ? 'currentColor' : 'none'} className={rating >= star ? 'animate-in zoom-in-50 duration-300' : ''} />
+                          <Star size={20} fill={rating >= star ? 'currentColor' : 'none'} className={rating >= star ? 'animate-in zoom-in-50 duration-300' : ''} />
                         </button>
                       ))}
                     </div>
@@ -746,22 +885,22 @@ export default function TicketDetailView({ portal }: Props) {
                       value={feedback}
                       onChange={(e) => setFeedback(e.target.value)}
                       placeholder="Any additional comments?"
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm focus:ring-4 focus:ring-primary/5 focus:border-primary/20 outline-none transition-all mb-4 min-h-[100px] resize-none font-medium"
+                      className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-xs focus:ring-4 focus:ring-primary/5 focus:border-primary/20 outline-none transition-all mb-4 min-h-[80px] resize-none font-medium"
                     />
                     
-                    <div className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-2">
                       <Button 
                         onClick={handleSubmitFeedback}
                         disabled={!rating || submittingFeedback}
-                        className="w-full h-14 rounded-[1.25rem] bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm tracking-tight transition-all active:scale-95 disabled:opacity-50"
+                        className="w-full h-11 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs tracking-tight transition-all active:scale-95 disabled:opacity-50"
                       >
-                         {submittingFeedback ? 'Submitting...' : 'Submit Feedback & Close Ticket'}
+                         {submittingFeedback ? 'Submitting...' : 'Submit & Close Ticket'}
                       </Button>
                       
                       <Button 
                         variant="ghost"
                         onClick={handleReopenTicket}
-                        className="text-slate-400 hover:text-slate-600 font-bold text-xs uppercase tracking-widest"
+                        className="text-slate-400 hover:text-slate-600 font-bold text-[10px] uppercase tracking-widest h-8"
                       >
                         Not satisfied? Reopen Ticket
                       </Button>
@@ -769,20 +908,20 @@ export default function TicketDetailView({ portal }: Props) {
                   </>
                 ) : (
                   <>
-                    <div className="w-16 h-16 bg-green-100 text-green-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                      <CheckCircle2 size={32} />
+                    <div className="w-12 h-12 bg-green-50 text-green-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle2 size={24} />
                     </div>
-                    <div className="space-y-2 mb-8">
-                      <h3 className="text-xl font-bold text-slate-900 tracking-tight">Ticket Resolved</h3>
-                      <p className="text-xs text-slate-500 max-w-xs leading-relaxed font-medium mx-auto">
+                    <div className="space-y-1 mb-6">
+                      <h3 className="text-lg font-bold text-slate-900 tracking-tight">Ticket Resolved</h3>
+                      <p className="text-xs text-slate-400 max-w-xs leading-relaxed font-medium mx-auto">
                         {ticket.rating 
                           ? `Feedback: "${ticket.feedback}"` 
                           : "Waiting for the customer to provide feedback on this case."}
                       </p>
                       {ticket.rating && (
-                        <div className="flex justify-center gap-1 mt-4">
+                        <div className="flex justify-center gap-1 mt-3">
                           {[1, 2, 3, 4, 5].map(s => (
-                            <Star key={s} size={20} fill={s <= ticket.rating! ? '#fbbf24' : 'none'} className={s <= ticket.rating! ? 'text-yellow-400' : 'text-slate-200'} />
+                            <Star key={s} size={16} fill={s <= ticket.rating! ? '#fbbf24' : 'none'} className={s <= ticket.rating! ? 'text-yellow-400' : 'text-slate-200'} />
                           ))}
                         </div>
                       )}
@@ -791,7 +930,7 @@ export default function TicketDetailView({ portal }: Props) {
                       <Button 
                         variant="outline"
                         onClick={handleReopenTicket}
-                        className="w-full h-12 border-slate-200 text-slate-600 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all font-mono"
+                        className="w-full h-10 border-slate-200 text-slate-600 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all font-mono"
                       >
                         Re-open Ticket
                       </Button>
@@ -799,7 +938,7 @@ export default function TicketDetailView({ portal }: Props) {
                     {portal === 'user' && ticket.rating && (
                       <Button 
                         onClick={() => setIsNewTicketOpen(true)}
-                        className="w-full h-12 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold text-xs uppercase tracking-widest transition-all"
+                        className="w-full h-10 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold text-xs uppercase tracking-widest transition-all"
                       >
                         Create New Ticket
                       </Button>
@@ -1037,9 +1176,33 @@ export default function TicketDetailView({ portal }: Props) {
                      <section className="pt-6 border-t border-slate-100">
                         <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-4">Internal Controls</h4>
                         <div className="grid grid-cols-2 gap-2">
-                           <Button variant="outline" size="sm" className="w-full text-[10px] font-bold tracking-tight rounded-lg h-9 border-slate-200" onClick={() => toast.info('Re-assignment queue opened')}>
-                              Re-Assign
-                           </Button>
+                           <DropdownMenu>
+                             <DropdownMenuTrigger asChild>
+                               <Button variant="outline" size="sm" className="w-full text-[10px] font-bold tracking-tight rounded-lg h-9 border-slate-200" disabled={isAssigning}>
+                                  {isAssigning ? 'Assigning...' : 'Re-Assign'}
+                               </Button>
+                             </DropdownMenuTrigger>
+                             <DropdownMenuContent align="end" className="w-[200px] rounded-xl p-1 bg-white shadow-xl border border-slate-200">
+                                <div className="px-2 py-1.5 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 mb-1">
+                                   Select Agent
+                                </div>
+                                <DropdownMenuItem onClick={() => handleAssignTicket(user?.id)} className="rounded-lg text-xs gap-2 cursor-pointer focus:bg-primary/5 focus:text-primary">
+                                   <Avatar className="w-5 h-5">
+                                      <AvatarImage src={user?.avatar} />
+                                   </Avatar>
+                                   Assign to me
+                                </DropdownMenuItem>
+                                {admins.filter(a => a.id !== user?.id).map((admin) => (
+                                  <DropdownMenuItem key={admin.id} onClick={() => handleAssignTicket(admin.id)} className="rounded-lg text-xs gap-2 cursor-pointer focus:bg-primary/5 focus:text-primary">
+                                     <Avatar className="w-5 h-5">
+                                        <AvatarImage src={admin.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${admin.id}`} />
+                                     </Avatar>
+                                     {admin.name}
+                                  </DropdownMenuItem>
+                                ))}
+                             </DropdownMenuContent>
+                           </DropdownMenu>
+
                            <Button variant="outline" size="sm" className="w-full text-[10px] font-bold tracking-tight rounded-lg h-9 border-slate-200" onClick={() => toast.info('Transfer protocols initiated')}>
                               Transfer
                            </Button>

@@ -42,8 +42,9 @@ export default function AdminDashboard() {
   const [adminSearch, setAdminSearch] = useState('');
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [assigningId, setAssigningId] = useState<string | number | null>(null);
   const [users, setUsers] = useState<any[]>([]);
+  const [admins, setAdmins] = useState<any[]>([]);
   const [userPagination, setUserPagination] = useState<any>(null);
   const [userPage, setUserPage] = useState(1);
   const [feedbackData, setFeedbackData] = useState<any>(null);
@@ -97,12 +98,13 @@ export default function AdminDashboard() {
 
   const fetchUsers = async (page = 1) => {
     try {
-      const res = await fetch(`/api/admin/users?page=${page}&limit=10`, {
+      const res = await fetch(`/api/admin/users?page=${page}&limit=100`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users);
+        setAdmins(data.users.filter((u: any) => u.role === 'admin'));
         setUserPagination(data.pagination);
       }
     } catch (err) {
@@ -149,7 +151,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleAssignTicket = async (ticketId: string, agentName: string) => {
+  const handleAssignTicket = async (ticketId: number | string, adminId: number | string) => {
     try {
       const res = await fetch(`/api/tickets/${ticketId}/assign`, {
         method: 'PATCH',
@@ -157,12 +159,13 @@ export default function AdminDashboard() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify({ assignedTo: agentName })
+        body: JSON.stringify({ assignedTo: adminId })
       });
 
       if (res.ok) {
-        toast.success(`Ticket assigned to ${agentName}`);
-        setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, assignedTo: agentName } : t));
+        const admin = admins.find(a => a.id === adminId);
+        toast.success(`Ticket assigned to ${admin?.name || 'Agent'}`);
+        setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, assignedTo: adminId } : t));
         setAssigningId(null);
       }
     } catch (err) {
@@ -171,8 +174,9 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleDeleteTicket = async (ticketId: string) => {
-    if (!window.confirm('Are you sure you want to delete this ticket and all its assets? This cannot be undone.')) return;
+  const handleDeleteTicket = async (ticketId: number | string) => {
+    const isConfirmed = window.confirm(`Permanently delete ticket #${ticketId}? This will remove all messages and files.`);
+    if (!isConfirmed) return;
     
     try {
       const res = await fetch(`/api/tickets/${ticketId}`, {
@@ -183,10 +187,12 @@ export default function AdminDashboard() {
         toast.success('Ticket and assets deleted');
         setTickets(prev => prev.filter(t => t.id !== ticketId));
       } else {
-        toast.error('Failed to delete ticket');
+        const data = await res.json();
+        toast.error(data.message || 'Failed to delete ticket');
       }
     } catch (err) {
       console.error('Delete error:', err);
+      toast.error('Connection error');
     }
   };
 
@@ -356,7 +362,7 @@ export default function AdminDashboard() {
                                 </div>
                                 <div className="flex-1 min-w-0">
                                    <div className="flex items-center gap-2 mb-1">
-                                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{ticket.id}</span>
+                                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">#{ticket.id}</span>
                                       <span className="text-[10px] font-bold text-slate-400">•</span>
                                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{ticket.category}</span>
                                    </div>
@@ -374,21 +380,33 @@ export default function AdminDashboard() {
                                       }}
                                      className="flex items-center gap-2 px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors border border-slate-200"
                                    >
-                                      <span className="text-xs font-bold text-slate-700">{ticket.assignedTo || 'Unassigned'}</span>
+                                      <span className="text-xs font-bold text-slate-700">
+                                        {admins.find(a => a.id === ticket.assignedTo)?.name || 'Unassigned'}
+                                      </span>
                                       <UserPlus size={12} className="text-slate-400" />
                                    </button>
                                    
                                    {assigningId === ticket.id && (
                                      <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden text-left" onClick={(e) => e.stopPropagation()}>
                                         <div className="p-2 border-b border-slate-100 bg-slate-50 text-[10px] font-bold text-slate-400 uppercase">Select Agent</div>
-                                        {agents.map(agent => (
+                                        <button 
+                                          onClick={() => handleAssignTicket(ticket.id, currentUser?.id!)}
+                                          className="w-full flex items-center gap-3 p-2 hover:bg-slate-50 transition-colors border-b border-slate-50"
+                                        >
+                                          <Avatar className="w-5 h-5 rounded-md">
+                                             <AvatarImage src={currentUser?.avatar} />
+                                             <AvatarFallback>ME</AvatarFallback>
+                                          </Avatar>
+                                          <span className="text-xs font-bold text-primary">Assign to me</span>
+                                        </button>
+                                        {admins.filter(a => a.id !== currentUser?.id).map(agent => (
                                           <button 
                                             key={agent.id}
-                                            onClick={() => handleAssignTicket(ticket.id, agent.name)}
+                                            onClick={() => handleAssignTicket(ticket.id, agent.id)}
                                             className="w-full flex items-center gap-3 p-2 hover:bg-slate-50 transition-colors"
                                           >
-                                            <Avatar className="w-6 h-6 rounded-md">
-                                               <AvatarImage src={agent.avatar} />
+                                            <Avatar className="w-5 h-5 rounded-md">
+                                               <AvatarImage src={agent.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${agent.id}`} />
                                                <AvatarFallback>{agent.name[0]}</AvatarFallback>
                                             </Avatar>
                                             <span className="text-xs font-medium text-slate-700">{agent.name}</span>

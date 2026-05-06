@@ -82,7 +82,7 @@ async function initializeDatabase(db: mysql.Pool) {
     // Create Users Table
     await db.query(`
       CREATE TABLE IF NOT EXISTS users (
-        id VARCHAR(36) PRIMARY KEY,
+        id INT AUTO_INCREMENT PRIMARY KEY,
         email VARCHAR(255) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
         name VARCHAR(255) NOT NULL,
@@ -93,67 +93,39 @@ async function initializeDatabase(db: mysql.Pool) {
     // Create Tickets Table
     await db.query(`
       CREATE TABLE IF NOT EXISTS tickets (
-        id VARCHAR(36) PRIMARY KEY,
-        userId VARCHAR(36) NOT NULL,
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        userId INT NOT NULL,
         subject VARCHAR(255) NOT NULL,
         description TEXT,
         status ENUM('open', 'pending', 'resolved', 'closed') DEFAULT 'open',
         priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium',
         category VARCHAR(50),
-        assigned_to VARCHAR(36),
+        assignedTo INT,
         rating INT,
         feedback TEXT,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Migration: ensure columns exist if table was created earlier
-    try {
-      await db.query('ALTER TABLE tickets ADD COLUMN rating INT');
-      console.log('Added rating column to tickets table.');
-    } catch (err: any) {
-      if (err.code !== 'ER_DUP_FIELDNAME' && err.errno !== 1060) {
-        console.error('Migration error (rating):', err);
-      }
-    }
-    
-    try {
-      await db.query('ALTER TABLE tickets ADD COLUMN feedback TEXT');
-      console.log('Added feedback column to tickets table.');
-    } catch (err: any) {
-      if (err.code !== 'ER_DUP_FIELDNAME' && err.errno !== 1060) {
-        console.error('Migration error (feedback):', err);
-      }
-    }
-
     // Create Messages Table
     await db.query(`
       CREATE TABLE IF NOT EXISTS messages (
-        id VARCHAR(36) PRIMARY KEY,
-        ticketId VARCHAR(36) NOT NULL,
-        senderId VARCHAR(36) NOT NULL,
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ticketId INT NOT NULL,
+        senderId INT, -- Null for system messages
         content TEXT,
-        replyToId VARCHAR(36),
+        replyToId INT,
+        isSystem BOOLEAN DEFAULT FALSE,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Migration for messages
-    try {
-      await db.query('ALTER TABLE messages ADD COLUMN replyToId VARCHAR(36)');
-      console.log('Added replyToId column to messages table.');
-    } catch (err: any) {
-      if (err.code !== 'ER_DUP_FIELDNAME' && err.errno !== 1060) {
-        console.error('Migration error (replyToId):', err);
-      }
-    }
-
     // Create Attachments Table
     await db.query(`
       CREATE TABLE IF NOT EXISTS attachments (
-        id VARCHAR(36) PRIMARY KEY,
-        ticketId VARCHAR(36) NOT NULL,
-        messageId VARCHAR(36),
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ticketId INT NOT NULL,
+        messageId INT,
         fileName VARCHAR(255) NOT NULL,
         fileUrl VARCHAR(500) NOT NULL,
         fileType VARCHAR(100),
@@ -165,7 +137,7 @@ async function initializeDatabase(db: mysql.Pool) {
     // Create Tags Tables
     await db.query(`
       CREATE TABLE IF NOT EXISTS tags (
-        id VARCHAR(36) PRIMARY KEY,
+        id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(50) UNIQUE NOT NULL,
         color VARCHAR(20) DEFAULT '#000000'
       )
@@ -173,8 +145,8 @@ async function initializeDatabase(db: mysql.Pool) {
 
     await db.query(`
       CREATE TABLE IF NOT EXISTS ticket_tags (
-        ticketId VARCHAR(36) NOT NULL,
-        tagId VARCHAR(36) NOT NULL,
+        ticketId INT NOT NULL,
+        tagId INT NOT NULL,
         PRIMARY KEY (ticketId, tagId)
       )
     `);
@@ -183,7 +155,7 @@ async function initializeDatabase(db: mysql.Pool) {
     await db.query(`
       CREATE TABLE IF NOT EXISTS secure_links (
         token VARCHAR(128) PRIMARY KEY,
-        userId VARCHAR(36) NOT NULL,
+        userId INT NOT NULL,
         expiresAt TIMESTAMP NOT NULL,
         used BOOLEAN DEFAULT FALSE
       )
@@ -193,16 +165,16 @@ async function initializeDatabase(db: mysql.Pool) {
     const [adminRows]: any = await db.query('SELECT * FROM users WHERE email = ?', ['admin@zenith.com']);
     if (adminRows.length === 0) {
       const hashedPassword = await bcrypt.hash('admin123', 10);
-      await db.query('INSERT INTO users (id, email, password, name, role) VALUES (?, ?, ?, ?, ?)', 
-        ['a1', 'admin@zenith.com', hashedPassword, 'Support Admin', 'admin']);
+      await db.query('INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)', 
+        ['admin@zenith.com', hashedPassword, 'Support Admin', 'admin']);
       console.log('Admin user seeded into database.');
     }
 
     const [userRows]: any = await db.query('SELECT * FROM users WHERE email = ?', ['user@example.com']);
     if (userRows.length === 0) {
       const hashedPassword = await bcrypt.hash('user123', 10);
-      await db.query('INSERT INTO users (id, email, password, name, role) VALUES (?, ?, ?, ?, ?)', 
-        ['u1', 'user@example.com', hashedPassword, 'Demo User', 'user']);
+      await db.query('INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)', 
+        ['user@example.com', hashedPassword, 'Demo User', 'user']);
       console.log('Demo user seeded into database.');
     }
   } catch (err) {
@@ -235,15 +207,16 @@ app.post('/api/upload', authenticateJWT, upload.single('file'), async (req: any,
   
   const { ticketId, messageId } = req.body;
   const fileUrl = `/uploads/${req.file.filename}`;
-  const attachmentId = Math.random().toString(36).substr(2, 9);
   
   const db = await getDb();
+  let attachmentId = null;
   if (db && ticketId) {
     try {
-      await db.query(
-        'INSERT INTO attachments (id, ticketId, messageId, fileName, fileUrl, fileType, fileSize) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [attachmentId, ticketId, messageId || null, req.file.originalname, fileUrl, req.file.mimetype, req.file.size]
+      const [result]: any = await db.query(
+        'INSERT INTO attachments (ticketId, messageId, fileName, fileUrl, fileType, fileSize) VALUES (?, ?, ?, ?, ?, ?)',
+        [ticketId, messageId || null, req.file.originalname, fileUrl, req.file.mimetype, req.file.size]
       );
+      attachmentId = result.insertId;
     } catch (err) {
       console.error('Database attachment error:', err);
     }
@@ -409,15 +382,15 @@ app.get('/api/admin/users', authenticateJWT, async (req: any, res) => {
 app.post('/api/tickets', authenticateJWT, async (req: any, res) => {
   const { subject, description, category, priority } = req.body;
   const userId = req.user.id;
-  const ticketId = Math.random().toString(36).substr(2, 9);
   
   const db = await getDb();
   if (db) {
     try {
-      await db.query(
-        'INSERT INTO tickets (id, userId, subject, description, category, priority) VALUES (?, ?, ?, ?, ?, ?)',
-        [ticketId, userId, subject, description, category, priority || 'medium']
+      const [result]: any = await db.query(
+        'INSERT INTO tickets (userId, subject, description, category, priority) VALUES (?, ?, ?, ?, ?, ?)',
+        [userId, subject, description, category, priority || 'medium']
       );
+      const ticketId = result.insertId;
       io.emit('new-ticket', { id: ticketId, subject, userId });
       return res.json({ id: ticketId, userId, subject, description, category, priority: priority || 'medium', status: 'open' });
     } catch (err) {
@@ -426,7 +399,7 @@ app.post('/api/tickets', authenticateJWT, async (req: any, res) => {
     }
   }
   
-  res.json({ id: ticketId, userId, subject, description, category, priority: priority || 'medium', status: 'open' });
+  res.status(500).json({ message: 'Database disconnected' });
 });
 
 // List Tickets API
@@ -558,15 +531,39 @@ app.patch('/api/tickets/:id/assign', authenticateJWT, async (req: any, res) => {
   const db = await getDb();
   if (db) {
     try {
-      await db.query('UPDATE tickets SET assigned_to = ? WHERE id = ?', [assignedTo, id]);
-      return res.json({ message: 'Ticket assigned successfully' });
+      // 1. Get assignee name
+      const [userRows]: any = await db.query('SELECT name FROM users WHERE id = ?', [assignedTo]);
+      const assigneeName = userRows.length > 0 ? userRows[0].name : 'Unknown Agent';
+
+      // 2. Update Ticket
+      await db.query('UPDATE tickets SET assignedTo = ? WHERE id = ?', [assignedTo, id]);
+      
+      // 3. Create System Message
+      const content = `Ticket assigned to ${assigneeName}`;
+      const [msgResult]: any = await db.query(
+        'INSERT INTO messages (ticketId, content, isSystem) VALUES (?, ?, TRUE)',
+        [id, content]
+      );
+
+      const sysMessage = {
+        id: msgResult.insertId,
+        ticketId: parseInt(id),
+        content,
+        isSystem: true,
+        createdAt: new Date().toISOString()
+      };
+
+      io.to(id.toString()).emit('message-received', sysMessage);
+      io.emit('ticket-updated', { id: parseInt(id), assignedTo: parseInt(assignedTo) });
+
+      return res.json({ message: 'Ticket assigned successfully', sysMessage });
     } catch (err) {
       console.error('Database assign error:', err);
       return res.status(500).json({ message: 'Internal server error' });
     }
   }
   
-  res.json({ message: 'Ticket assigned (demo mode)' });
+  res.status(500).json({ message: 'Database disconnected' });
 });
 
 // Update Ticket Status API
@@ -658,24 +655,28 @@ app.delete('/api/tickets/:id', authenticateJWT, async (req: any, res) => {
   if (db) {
     try {
       // 1. Get all attachments for this ticket
-      const [attachments]: any = await db.query('SELECT filePath FROM attachments WHERE ticketId = ?', [id]);
+      const [attachments]: any = await db.query('SELECT fileUrl FROM attachments WHERE ticketId = ?', [id]);
       
       // 2. Delete physical files
       for (const attachment of attachments) {
-        const fullPath = path.join(process.cwd(), attachment.filePath);
-        try {
-          if (fs.existsSync(fullPath)) {
-            fs.unlinkSync(fullPath);
+        // fileUrl is like "/uploads/filename.ext"
+        const fileName = attachment.fileUrl.split('/').pop();
+        if (fileName) {
+          const fullPath = path.join(process.cwd(), 'uploads', fileName);
+          try {
+            if (fs.existsSync(fullPath)) {
+              fs.unlinkSync(fullPath);
+            }
+          } catch (fileErr) {
+            console.error(`Error deleting file ${fullPath}:`, fileErr);
           }
-        } catch (fileErr) {
-          console.error(`Error deleting file ${fullPath}:`, fileErr);
         }
       }
 
       // 3. Delete from DB records
       await db.query('DELETE FROM attachments WHERE ticketId = ?', [id]);
       await db.query('DELETE FROM messages WHERE ticketId = ?', [id]);
-      await db.query('DELETE FROM ticket_tags WHERE ticket_id = ?', [id]);
+      await db.query('DELETE FROM ticket_tags WHERE ticketId = ?', [id]);
       await db.query('DELETE FROM tickets WHERE id = ?', [id]);
 
       return res.json({ message: 'Ticket and all associated files deleted successfully' });
@@ -758,16 +759,17 @@ io.on('connection', (socket) => {
     const db = await getDb();
     if (db) {
       try {
-        await db.query(
-          'INSERT INTO messages (id, ticketId, senderId, content, replyToId, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
-          [message.id, message.ticketId, message.senderId, message.content, message.replyToId || null, new Date(message.createdAt)]
+        const [result]: any = await db.query(
+          'INSERT INTO messages (ticketId, senderId, content, replyToId, createdAt) VALUES (?, ?, ?, ?, ?)',
+          [message.ticketId, message.senderId, message.content, message.replyToId || null, new Date(message.createdAt)]
         );
+        message.id = result.insertId;
       } catch (err) {
         console.error('Failed to persist message via socket:', err);
       }
     }
     // Broadcast to the ticket room
-    io.to(message.ticketId).emit('message-received', message);
+    io.to(message.ticketId.toString()).emit('message-received', message);
   });
 
   socket.on('disconnect', () => {
