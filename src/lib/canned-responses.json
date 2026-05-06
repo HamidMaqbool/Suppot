@@ -1,0 +1,28 @@
+{
+  "responses": [
+    {
+      "id": "welcome",
+      "category": "General",
+      "title": "Welcome Greeting",
+      "content": "Hello! Thank you for reaching out to ZenithDesk support. I've received your inquiry and I'm looking into it right now. How can I best assist you today?"
+    },
+    {
+      "id": "info_needed",
+      "category": "Support",
+      "title": "More Info Needed",
+      "content": "To help you faster, could you please provide more details about the issue? Specifically, any error messages you saw or steps to reproduce the behavior would be very helpful."
+    },
+    {
+      "id": "resolved",
+      "category": "Closing",
+      "title": "Issue Resolved",
+      "content": "I'm glad we could get that sorted out for you! If you have any other questions, feel free to open a new ticket. Have a great day!"
+    },
+    {
+      "id": "escalating",
+      "category": "Support",
+      "title": "Escalating Ticket",
+      "content": "I'm escalating this ticket to our senior technical team for a deeper investigation. They will get back to you with an update shortly. Thank you for your patience."
+    }
+  ]
+}
