@@ -65,8 +65,42 @@ export default function TicketDetailView({ portal }: Props) {
   const typingTimeoutRef = useRef<NodeJS.Timeout|null>(null);
 
   useEffect(() => {
+    const fetchData = async () => {
+      setIsLoading(true);
+      try {
+        // Fetch Ticket
+        const ticketRes = await fetch(`/api/tickets/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (ticketRes.ok) {
+          const ticketData = await ticketRes.json();
+          setTicket(ticketData);
+        }
+
+        // Fetch Messages
+        const messagesRes = await fetch(`/api/tickets/${id}/messages`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (messagesRes.ok) {
+          const messagesData = await messagesRes.json();
+          setMessages(messagesData);
+        }
+      } catch (err) {
+        console.error('Fetch ticket detail error:', err);
+        toast.error('Failed to load conversation');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (id && token) {
+      fetchData();
+    }
+  }, [id, token]);
+
+  useEffect(() => {
     const fetchResponses = async () => {
-      if (portal === 'admin') {
+      if (portal === 'admin' && token) {
         const res = await fetch('/api/admin/canned-responses', {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -112,7 +146,7 @@ export default function TicketDetailView({ portal }: Props) {
     const msg: Message = {
       id: Math.random().toString(36).substr(2, 9),
       ticketId: id!,
-      senderId: user?.id || (portal === 'user' ? 'u1' : 'a1'),
+      senderId: user?.id || 'unknown',
       content: newMessage,
       replyToId: replyingTo?.id,
       createdAt: new Date().toISOString(),
@@ -163,7 +197,7 @@ export default function TicketDetailView({ portal }: Props) {
 
   if (!ticket) return <div>Ticket not found</div>;
 
-  const requestor = MOCK_USERS.find(u => u.id === ticket.userId);
+  const requestor = MOCK_USERS.find(u => u.id === ticket.userId) || { name: 'Customer', avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${ticket.userId}`, email: 'customer@example.com' };
 
   return (
     <div className="h-screen flex bg-white overflow-hidden">
@@ -180,7 +214,7 @@ export default function TicketDetailView({ portal }: Props) {
                  <h1 className="text-sm font-bold text-slate-900 truncate">{ticket.subject}</h1>
                </div>
                <p className="text-[10px] text-slate-500 flex items-center gap-1">
-                 <Clock size={10} /> Opened {format(new Date(ticket.createdAt), 'PPp')}
+                 <Clock size={10} /> Opened {ticket.createdAt ? format(new Date(ticket.createdAt), 'PPp') : 'Recently'}
                </p>
             </div>
           </div>
@@ -196,12 +230,12 @@ export default function TicketDetailView({ portal }: Props) {
           <div className="max-w-4xl mx-auto space-y-8 pb-10">
             <div className="flex gap-4">
                <Avatar className="w-10 h-10 border-2 border-white shadow-sm ring-1 ring-slate-200">
-                 <AvatarImage src={requestor?.avatar} />
+                 <AvatarImage src={requestor.avatar} />
                  <AvatarFallback>U</AvatarFallback>
                </Avatar>
                <div className="flex-1">
                  <div className="flex items-center gap-2 mb-1.5">
-                   <span className="text-sm font-bold text-slate-900">{requestor?.name}</span>
+                   <span className="text-sm font-bold text-slate-900">{requestor.name}</span>
                    <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Original Post</span>
                  </div>
                  <div className="bg-white p-6 rounded-2xl rounded-tl-none border border-slate-200 shadow-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
@@ -218,10 +252,10 @@ export default function TicketDetailView({ portal }: Props) {
 
             <AnimatePresence initial={false}>
               {messages.map((msg) => {
-                const sender = MOCK_USERS.find(u => u.id === msg.senderId);
                 const isMe = (msg.senderId === user?.id);
+                const sender = MOCK_USERS.find(u => u.id === msg.senderId) || (isMe ? user : { name: portal === 'user' ? 'Support' : 'Customer', avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${msg.senderId}` });
                 const replyTo = msg.replyToId ? messages.find(m => m.id === msg.replyToId) : null;
-                const replySender = replyTo ? MOCK_USERS.find(u => u.id === replyTo.senderId) : null;
+                const replySender = replyTo ? (MOCK_USERS.find(u => u.id === replyTo.senderId) || { name: 'User' }) : null;
                 
                 return (
                   <motion.div 
@@ -232,12 +266,12 @@ export default function TicketDetailView({ portal }: Props) {
                   >
                     <Avatar className="w-10 h-10 border-2 border-white shadow-sm ring-1 ring-slate-200 shrink-0 self-end mb-2">
                       <AvatarImage src={sender?.avatar} />
-                      <AvatarFallback>{sender?.name[0]}</AvatarFallback>
+                      <AvatarFallback>{sender?.name ? sender.name[0] : '?'}</AvatarFallback>
                     </Avatar>
                     <div className={`max-w-[75%] space-y-2 ${isMe ? 'text-right' : ''}`}>
                       <div className={`flex items-center gap-2 mb-1 ${isMe ? 'flex-row-reverse' : ''}`}>
                         <span className="text-xs font-bold text-slate-900">{sender?.name}</span>
-                        <span className="text-[10px] text-slate-400 font-medium">{format(new Date(msg.createdAt), 'h:mm a')}</span>
+                        <span className="text-[10px] text-slate-400 font-medium">{msg.createdAt ? format(new Date(msg.createdAt), 'h:mm a') : 'Now'}</span>
                       </div>
                       
                       <div className="relative">

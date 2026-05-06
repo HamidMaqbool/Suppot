@@ -135,6 +135,93 @@ const authenticateJWT = (req: any, res: any, next: any) => {
 
 // --- API Routes ---
 
+// Create Ticket API
+app.post('/api/tickets', authenticateJWT, async (req: any, res) => {
+  const { subject, description, category, priority } = req.body;
+  const userId = req.user.id;
+  const ticketId = Math.random().toString(36).substr(2, 9);
+  
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.query(
+        'INSERT INTO tickets (id, userId, subject, description, category, priority) VALUES (?, ?, ?, ?, ?, ?)',
+        [ticketId, userId, subject, description, category, priority || 'medium']
+      );
+      return res.json({ id: ticketId, userId, subject, description, category, priority: priority || 'medium', status: 'open' });
+    } catch (err) {
+      console.error('Database create ticket error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  
+  res.json({ id: ticketId, userId, subject, description, category, priority: priority || 'medium', status: 'open' });
+});
+
+// List Tickets API
+app.get('/api/tickets', authenticateJWT, async (req: any, res) => {
+  const db = await getDb();
+  if (db) {
+    try {
+      let query = 'SELECT * FROM tickets';
+      let params: any[] = [];
+      
+      if (req.user.role === 'user') {
+        query += ' WHERE userId = ?';
+        params.push(req.user.id);
+      }
+      
+      query += ' ORDER BY createdAt DESC';
+      const [rows] = await db.query(query, params);
+      return res.json(rows);
+    } catch (err) {
+      console.error('Database list tickets error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  
+  res.json([]); // Fallback to empty list or mock data could be handled here
+});
+
+// Get Ticket Detail API
+app.get('/api/tickets/:id', authenticateJWT, async (req: any, res) => {
+  const { id } = req.params;
+  const db = await getDb();
+  if (db) {
+    try {
+      const [rows]: any = await db.query('SELECT * FROM tickets WHERE id = ?', [id]);
+      if (rows.length === 0) return res.status(404).json({ message: 'Ticket not found' });
+      
+      const ticket = rows[0];
+      if (req.user.role === 'user' && ticket.userId !== req.user.id) {
+        return res.sendStatus(403);
+      }
+      
+      return res.json(ticket);
+    } catch (err) {
+      console.error('Database get ticket error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  res.status(404).json({ message: 'Not found in demo mode' });
+});
+
+// List Messages API
+app.get('/api/tickets/:id/messages', authenticateJWT, async (req: any, res) => {
+  const { id } = req.params;
+  const db = await getDb();
+  if (db) {
+    try {
+      const [rows] = await db.query('SELECT * FROM messages WHERE ticketId = ? ORDER BY createdAt ASC', [id]);
+      return res.json(rows);
+    } catch (err) {
+      console.error('Database list messages error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  res.json([]);
+});
+
 // Login API
 app.post('/api/auth/login', async (req, res) => {
   const { email, password, role } = req.body;
@@ -215,7 +302,19 @@ io.on('connection', (socket) => {
     socket.to(ticketId).emit('user-typing', { userId, isTyping });
   });
 
-  socket.on('new-message', (message) => {
+  socket.on('new-message', async (message) => {
+    // Persist to DB if possible
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.query(
+          'INSERT INTO messages (id, ticketId, senderId, content, createdAt) VALUES (?, ?, ?, ?, ?)',
+          [message.id, message.ticketId, message.senderId, message.content, new Date(message.createdAt)]
+        );
+      } catch (err) {
+        console.error('Failed to persist message via socket:', err);
+      }
+    }
     // Broadcast to the ticket room
     io.to(message.ticketId).emit('message-received', message);
   });

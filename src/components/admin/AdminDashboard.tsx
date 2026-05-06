@@ -1,5 +1,5 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -18,23 +18,73 @@ import {
   MoreVertical,
   LifeBuoy,
   X,
-  UserPlus
+  UserPlus,
+  Loader2
 } from 'lucide-react';
-import { MOCK_TICKETS, MOCK_USERS } from '../../constants';
+import { MOCK_USERS } from '../../constants';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { format } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { toast } from 'sonner';
 import { useAuth } from '../../lib/AuthContext';
+import { Ticket } from '../../types';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const { logout, user: currentUser } = useAuth();
+  const { logout, user: currentUser, token } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('inbox');
   const [adminSearch, setAdminSearch] = useState('');
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [assigningId, setAssigningId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchTickets();
+  }, [token]);
+
+  const fetchTickets = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/tickets', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTickets(data);
+      }
+    } catch (err) {
+      console.error('Fetch tickets error:', err);
+      toast.error('Failed to load tickets');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAssignTicket = async (ticketId: string, agentName: string) => {
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/assign`, {
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ assignedTo: agentName })
+      });
+
+      if (res.ok) {
+        toast.success(`Ticket assigned to ${agentName}`);
+        setTickets(tickets.map(t => t.id === ticketId ? { ...t, assignedTo: agentName } : t));
+        setAssigningId(null);
+      } else {
+        toast.error('Assignment failed');
+      }
+    } catch (err) {
+      console.error('Assign error:', err);
+      toast.error('Connection error');
+    }
+  };
 
   const agents = MOCK_USERS.filter(u => u.name.includes('Support') || [' Sarah', 'Alex'].some(n => u.name.includes(n)));
 
@@ -46,6 +96,18 @@ export default function AdminDashboard() {
       default: return 'bg-slate-300';
     }
   };
+
+  const filteredTickets = tickets.filter(t => 
+    t.subject.toLowerCase().includes(adminSearch.toLowerCase()) || 
+    t.id.toLowerCase().includes(adminSearch.toLowerCase())
+  );
+
+  const stats = [
+    { label: 'Unassigned', value: tickets.filter(t => !t.assignedTo).length.toString().padStart(2, '0'), icon: Inbox },
+    { label: 'Critical', value: tickets.filter(t => t.priority === 'urgent').length.toString().padStart(2, '0'), icon: AlertCircle },
+    { label: 'Pending Response', value: tickets.filter(t => t.status === 'pending').length.toString().padStart(2, '0'), icon: Clock },
+    { label: 'Open Incidents', value: tickets.filter(t => t.status === 'open').length.toString().padStart(2, '0'), icon: MessageSquare }
+  ];
 
   return (
     <div className="flex h-screen bg-[#F0F2F5] overflow-hidden">
@@ -126,7 +188,7 @@ export default function AdminDashboard() {
           </div>
           <div className="flex items-center gap-3">
              <Button variant="outline" size="sm" className="rounded-lg gap-2 text-xs font-semibold">
-                <Clock size={14} /> 2h SLA Time
+                <Clock size={14} /> Live Stream
              </Button>
              <Button size="sm" className="rounded-lg h-9 bg-slate-900 border-none hover:bg-slate-800" onClick={() => navigate('/')}>
                 Exit Admin
@@ -135,34 +197,27 @@ export default function AdminDashboard() {
         </header>
 
         {/* View Content */}
-        <main className="flex-1 overflow-auto p-8">
+        <main className="flex-1 overflow-auto p-8 relative">
+           {isLoading && (
+             <div className="absolute inset-0 flex items-center justify-center bg-[#F0F2F5]/50 z-10">
+               <Loader2 className="w-10 h-10 text-primary animate-spin" />
+             </div>
+           )}
            <div className="max-w-6xl mx-auto">
               {activeTab === 'inbox' ? (
                 <>
                   <header className="mb-8 flex items-end justify-between">
                      <div>
                         <h2 className="text-2xl font-bold text-slate-900 mb-1">Queue Management</h2>
-                        <p className="text-slate-500 text-sm italic serif">Viewing {MOCK_TICKETS.filter(t => t.subject.toLowerCase().includes(adminSearch.toLowerCase())).length} active incidents across EMEA region.</p>
-                     </div>
-                     <div className="flex gap-2">
-                        <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20 hover:bg-orange-500/10">3 CRITICAL</Badge>
-                        <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20 hover:bg-blue-500/10">9 QUEUED</Badge>
+                        <p className="text-slate-500 text-sm italic serif">Viewing {filteredTickets.length} active incidents across regional streams.</p>
                      </div>
                   </header>
 
                   <div className="grid grid-cols-4 gap-4 mb-8">
-                     {[
-                       { label: 'Avg Response', value: '12m 4s', trend: '-2m', icon: Clock },
-                       { label: 'Unassigned', value: '08', trend: '+2', icon: Inbox },
-                       { label: 'Satisfaction', value: '98%', trend: '+0.4', icon: CheckCircle2 },
-                       { label: 'Open Incidents', value: '24', trend: '-5', icon: AlertCircle }
-                     ].map((stat, i) => (
+                     {stats.map((stat, i) => (
                        <div key={i} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                           <div className="flex items-center justify-between mb-3 text-slate-400">
                              <stat.icon size={16} />
-                             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 ${stat.trend.startsWith('+') ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-600'}`}>
-                                {stat.trend} <ArrowUpRight size={10} />
-                             </span>
                           </div>
                           <p className="text-2xl font-bold text-slate-900 mono">{stat.value}</p>
                           <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mt-1">{stat.label}</p>
@@ -170,27 +225,23 @@ export default function AdminDashboard() {
                      ))}
                   </div>
 
-                  <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xl shadow-slate-200/50">
+                  <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xl shadow-slate-200/50 min-h-[400px]">
                      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
                         <h3 className="font-bold text-slate-800 text-sm uppercase tracking-tight">Active Ticket Stream</h3>
                         <div className="flex items-center gap-2">
-                           <Button variant="ghost" size="icon" className="w-8 h-8 rounded-lg"><MoreVertical size={16} /></Button>
+                           <Button variant="ghost" size="icon" onClick={fetchTickets} className="w-8 h-8 rounded-lg"><Clock size={16} /></Button>
                         </div>
                      </div>
                      <div className="divide-y divide-slate-100">
-                        {MOCK_TICKETS.filter(t => 
-                          t.subject.toLowerCase().includes(adminSearch.toLowerCase()) || 
-                          t.id.toLowerCase().includes(adminSearch.toLowerCase())
-                        ).map((ticket, i) => (
+                        {filteredTickets.map((ticket, i) => (
                           <motion.div 
                             key={ticket.id}
                             initial={{ opacity: 0, x: -10 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: i * 0.05 }}
                             className="group flex items-center px-6 py-5 hover:bg-slate-50 transition-all cursor-pointer border-l-4 border-transparent hover:border-primary"
-                            onClick={() => navigate(`/admin/ticket/${ticket.id}`)}
                           >
-                             <div className="flex items-center gap-4 flex-1 min-w-0">
+                             <div className="flex items-center gap-4 flex-1 min-w-0" onClick={() => navigate(`/admin/ticket/${ticket.id}`)}>
                                 <div className="relative">
                                    <Avatar className="w-12 h-12 rounded-2xl border-2 border-white shadow-sm">
                                       <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${ticket.userId}`} />
@@ -198,7 +249,7 @@ export default function AdminDashboard() {
                                    </Avatar>
                                    <div className={`absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-white ${getPriorityColor(ticket.priority)} shadow-sm`} title={ticket.priority} />
                                 </div>
-                                <div className="flex-1 min-w-0" onClick={() => navigate(`/admin/ticket/${ticket.id}`)}>
+                                <div className="flex-1 min-w-0">
                                    <div className="flex items-center gap-2 mb-1">
                                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{ticket.id}</span>
                                       <span className="text-[10px] font-bold text-slate-400">•</span>
@@ -218,7 +269,7 @@ export default function AdminDashboard() {
                                      }}
                                      className="flex items-center gap-2 px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors border border-slate-200"
                                    >
-                                      <span className="text-xs font-bold text-slate-700">Sarah A.</span>
+                                      <span className="text-xs font-bold text-slate-700">{ticket.assignedTo || 'Unassigned'}</span>
                                       <UserPlus size={12} className="text-slate-400" />
                                    </button>
                                    
@@ -228,10 +279,7 @@ export default function AdminDashboard() {
                                         {agents.map(agent => (
                                           <button 
                                             key={agent.id}
-                                            onClick={() => {
-                                              toast.success(`Ticket assigned to ${agent.name}`);
-                                              setAssigningId(null);
-                                            }}
+                                            onClick={() => handleAssignTicket(ticket.id, agent.name)}
                                             className="w-full flex items-center gap-3 p-2 hover:bg-slate-50 transition-colors"
                                           >
                                             <Avatar className="w-6 h-6 rounded-md">
@@ -263,11 +311,6 @@ export default function AdminDashboard() {
                              </div>
                           </motion.div>
                         ))}
-                     </div>
-                     <div className="p-4 bg-slate-50 border-t border-slate-100 text-center">
-                        <Button variant="ghost" size="sm" className="text-[10px] font-bold text-slate-400 p-0 hover:bg-transparent hover:text-slate-600 tracking-widest uppercase">
-                           View All Solved Incidents (12,442)
-                        </Button>
                      </div>
                   </div>
                 </>

@@ -1,6 +1,6 @@
 
 import * as React from 'react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -15,9 +15,9 @@ import {
   ArrowLeft,
   ChevronRight,
   Send,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
-import { MOCK_TICKETS } from '../../constants';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { 
@@ -33,12 +33,39 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { useAuth } from '../../lib/AuthContext';
+import { Ticket } from '../../types';
 
 export default function UserDashboard() {
   const navigate = useNavigate();
+  const { token } = useAuth();
+  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isNewTicketOpen, setIsNewTicketOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [newTicket, setNewTicket] = useState({ subject: '', category: 'Technical', message: '' });
+
+  useEffect(() => {
+    fetchTickets();
+  }, [token]);
+
+  const fetchTickets = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/tickets', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTickets(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch tickets:', err);
+      toast.error('Failed to load tickets');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -58,17 +85,46 @@ export default function UserDashboard() {
     }
   };
 
-  const handleCreateTicket = (e: React.FormEvent) => {
+  const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success('Support ticket created successfully!');
-    setIsNewTicketOpen(false);
-    setNewTicket({ subject: '', category: 'Technical', message: '' });
+    try {
+      const res = await fetch('/api/tickets', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({
+          subject: newTicket.subject,
+          description: newTicket.message,
+          category: newTicket.category,
+          priority: 'medium'
+        })
+      });
+
+      if (res.ok) {
+        const created = await res.json();
+        setTickets([created, ...tickets]);
+        toast.success('Support ticket created successfully!');
+        setIsNewTicketOpen(false);
+        setNewTicket({ subject: '', category: 'Technical', message: '' });
+      } else {
+        toast.error('Failed to create ticket');
+      }
+    } catch (err) {
+      console.error('Create ticket error:', err);
+      toast.error('Something went wrong');
+    }
   };
 
-  const filteredTickets = MOCK_TICKETS.filter(t => 
+  const filteredTickets = tickets.filter(t => 
     t.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
     t.id.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const activeCount = tickets.filter(t => t.status === 'open' || t.status === 'pending').length;
+  const resolvedCount = tickets.filter(t => t.status === 'resolved' || t.status === 'closed').length;
+  const pendingCount = tickets.filter(t => t.status === 'pending').length;
 
   return (
     <div className="min-h-screen bg-white">
@@ -164,9 +220,9 @@ export default function UserDashboard() {
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
           {[
-            { label: 'Active Tickets', value: 2, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
-            { label: 'Pending Response', value: 1, icon: AlertCircle, color: 'text-orange-600', bg: 'bg-orange-50' },
-            { label: 'Resolved', value: 12, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' }
+            { label: 'Active Tickets', value: activeCount, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
+            { label: 'Pending Response', value: pendingCount, icon: AlertCircle, color: 'text-orange-600', bg: 'bg-orange-50' },
+            { label: 'Resolved', value: resolvedCount, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' }
           ].map((stat, i) => (
             <motion.div 
               key={i}
@@ -203,7 +259,12 @@ export default function UserDashboard() {
         </div>
 
         {/* Ticket List Table-ish */}
-        <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm min-h-[200px] bg-white relative">
+           {isLoading ? (
+             <div className="absolute inset-0 flex items-center justify-center bg-white/50 z-10">
+               <Loader2 className="w-8 h-8 text-primary animate-spin" />
+             </div>
+           ) : null}
            <div className="bg-slate-50 px-6 py-3 grid grid-cols-12 gap-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200">
               <div className="col-span-2">Ticket ID</div>
               <div className="col-span-5">Subject</div>
@@ -217,7 +278,7 @@ export default function UserDashboard() {
                   key={ticket.id}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  transition={{ delay: 0.3 + (i * 0.05) }}
+                  transition={{ delay: 0.1 + (i * 0.05) }}
                   onClick={() => navigate(`/user/ticket/${ticket.id}`)}
                   className="px-6 py-5 grid grid-cols-12 gap-4 items-center hover:bg-slate-50 transition-colors cursor-pointer group"
                 >
@@ -235,7 +296,7 @@ export default function UserDashboard() {
                     </Badge>
                   </div>
                   <div className="col-span-2 text-xs text-slate-500">
-                    {format(new Date(ticket.updatedAt), 'MMM d, h:mm a')}
+                    {ticket.createdAt ? format(new Date(ticket.createdAt), 'MMM d, h:mm a') : 'N/A'}
                   </div>
                   <div className="col-span-1 flex justify-end">
                     <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-600 transition-colors" />
@@ -245,7 +306,7 @@ export default function UserDashboard() {
            </div>
         </div>
         
-        {filteredTickets.length === 0 && (
+        {!isLoading && filteredTickets.length === 0 && (
           <div className="text-center py-20 bg-slate-50 rounded-2xl mt-4 border border-dashed border-slate-200">
             <LifeBuoy className="w-12 h-12 text-slate-200 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-slate-900">No tickets found</h3>
