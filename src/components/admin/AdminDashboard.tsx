@@ -22,7 +22,9 @@ import {
   Loader2,
   Star,
   MessageSquareQuote,
-  Trash2
+  Trash2,
+  ShieldAlert,
+  UserCheck
 } from 'lucide-react';
 import { getSocket } from '../../lib/socket';
 import { MOCK_USERS } from '../../constants';
@@ -57,6 +59,7 @@ export default function AdminDashboard() {
   const [userPage, setUserPage] = useState(1);
   const [feedbackData, setFeedbackData] = useState<any>(null);
   const [feedbackPage, setFeedbackPage] = useState(1);
+  const isManager = currentUser?.role === 'admin' && (currentUser as any)?.roles?.includes('manager');
 
   const playSound = () => {
     const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
@@ -253,6 +256,7 @@ export default function AdminDashboard() {
           {[
             { id: 'inbox', label: 'Ticket Inbox', icon: Inbox },
             { id: 'analytics', label: 'Support Metrics', icon: BarChart3 },
+            { id: 'staff', label: 'Support Team', icon: ShieldAlert },
             { id: 'customers', label: 'Customers', icon: Users },
             { id: 'feedback', label: 'Feedback & Ratings', icon: Star },
             { id: 'settings', label: 'System Settings', icon: Settings },
@@ -277,7 +281,9 @@ export default function AdminDashboard() {
               {isSidebarOpen && (
                  <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-white truncate">{currentUser?.name || 'Sarah Admin'}</p>
-                    <p className="text-[10px] opacity-40 truncate">Lead Coordinator</p>
+                    <p className="text-[10px] opacity-40 truncate">
+                      {(currentUser as any)?.roles?.join(' • ') || 'Lead Coordinator'}
+                    </p>
                  </div>
               )}
               {isSidebarOpen && (
@@ -402,25 +408,31 @@ export default function AdminDashboard() {
                                         <div className="p-2 border-b border-slate-100 bg-slate-50 text-[10px] font-bold text-slate-400 uppercase">Select Agent</div>
                                         <button 
                                           onClick={() => handleAssignTicket(ticket.id, currentUser?.id!)}
-                                          className="w-full flex items-center gap-3 p-2 hover:bg-slate-50 transition-colors border-b border-slate-50"
+                                          className="w-full flex items-center gap-3 p-3 hover:bg-slate-50 transition-colors border-b border-slate-50"
                                         >
-                                          <Avatar className="w-5 h-5 rounded-md">
+                                          <Avatar className="w-6 h-6 rounded-lg">
                                              <AvatarImage src={currentUser?.avatar} />
                                              <AvatarFallback>ME</AvatarFallback>
                                           </Avatar>
-                                          <span className="text-xs font-bold text-primary">Assign to me</span>
+                                          <div className="flex flex-col text-left">
+                                             <span className="text-xs font-bold text-primary">Assign to me</span>
+                                             <span className="text-[9px] text-slate-400 font-bold uppercase">{(currentUser as any)?.roles?.join(' • ') || 'Agent'}</span>
+                                          </div>
                                         </button>
                                         {admins.filter(a => a.id !== currentUser?.id).map(agent => (
                                           <button 
                                             key={agent.id}
                                             onClick={() => handleAssignTicket(ticket.id, agent.id)}
-                                            className="w-full flex items-center gap-3 p-2 hover:bg-slate-50 transition-colors"
+                                            className="w-full flex items-center gap-3 p-3 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0"
                                           >
-                                            <Avatar className="w-5 h-5 rounded-md">
+                                            <Avatar className="w-6 h-6 rounded-lg">
                                                <AvatarImage src={agent.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${agent.id}`} />
                                                <AvatarFallback>{agent.name[0]}</AvatarFallback>
                                             </Avatar>
-                                            <span className="text-xs font-medium text-slate-700">{agent.name}</span>
+                                            <div className="flex flex-col text-left">
+                                               <span className="text-xs font-bold text-slate-700">{agent.name}</span>
+                                               <span className="text-[9px] text-slate-400 font-bold uppercase">{agent.roles?.join(' • ') || 'Agent'}</span>
+                                            </div>
                                           </button>
                                         ))}
                                      </div>
@@ -486,19 +498,57 @@ export default function AdminDashboard() {
                      </div>
                   </div>
                 </>
-              ) : activeTab === 'customers' ? (
+              ) : activeTab === 'staff' ? (
                 <>
                   <header className="mb-8">
-                    <h2 className="text-2xl font-bold text-slate-900 mb-1">Customer Management</h2>
-                    <p className="text-slate-500 text-sm">Directory of all registered customers and service level identifiers.</p>
+                    <h2 className="text-2xl font-bold text-slate-900 mb-1">Support Team</h2>
+                    <p className="text-slate-500 text-sm italic serif">Directory of internal specialists and their assigned roles.</p>
                   </header>
                   
                   <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xl shadow-slate-200/50">
                     <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                       <h3 className="font-bold text-slate-800 text-sm uppercase tracking-tight">User Directory</h3>
+                       <h3 className="font-bold text-slate-800 text-sm uppercase tracking-tight">Staff Registry</h3>
                     </div>
                     <div className="divide-y divide-slate-100">
-                       {users.map((user) => (
+                       {admins.map((staff) => (
+                         <div key={staff.id} className="flex items-center px-6 py-5 hover:bg-slate-50 transition-colors">
+                            <Avatar className="w-12 h-12 rounded-2xl mr-4 border-2 border-white shadow-sm">
+                               <AvatarImage src={staff.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${staff.id}`} />
+                               <AvatarFallback className="bg-slate-100 text-slate-500 font-bold">{staff.name[0]}</AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1">
+                               <div className="flex items-center gap-2">
+                                  <p className="font-black text-slate-900 text-sm">{staff.name}</p>
+                                  {staff.id === currentUser?.id && <Badge className="bg-primary/10 text-primary border-none text-[8px] font-black uppercase">You</Badge>}
+                               </div>
+                               <p className="text-xs text-slate-500 font-medium">{staff.email}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                               {staff.roles?.map((role: string) => (
+                                 <Badge key={role} variant="outline" className="uppercase text-[9px] font-black tracking-widest bg-slate-100 text-slate-500 border-none px-2 py-1">
+                                    {role}
+                                 </Badge>
+                               ))}
+                               {!staff.roles?.length && <Badge variant="outline" className="uppercase text-[9px] font-black tracking-widest bg-slate-50 text-slate-300 border-none px-2 py-1">Agent</Badge>}
+                            </div>
+                         </div>
+                       ))}
+                    </div>
+                  </div>
+                </>
+              ) : activeTab === 'customers' ? (
+                <>
+                  <header className="mb-8">
+                    <h2 className="text-2xl font-bold text-slate-900 mb-1">Customer Directory</h2>
+                    <p className="text-slate-500 text-sm">Review registered client base and service access levels.</p>
+                  </header>
+                  
+                  <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xl shadow-slate-200/50">
+                    <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                       <h3 className="font-bold text-slate-800 text-sm uppercase tracking-tight">Clients</h3>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                       {users.filter((u: any) => u.role === 'user').map((user) => (
                          <div key={user.id} className="flex items-center px-6 py-4 hover:bg-slate-50 transition-colors">
                             <Avatar className="w-10 h-10 rounded-xl mr-4 border border-slate-200">
                                <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`} />
@@ -509,18 +559,24 @@ export default function AdminDashboard() {
                                <p className="text-xs text-slate-500">{user.email}</p>
                             </div>
                             <div className="flex items-center gap-3">
-                               <Badge variant="outline" className="uppercase text-[9px] font-bold tracking-widest bg-slate-50 text-slate-500 border-slate-200">{user.role}</Badge>
+                               <Badge variant="outline" className="uppercase text-[9px] font-bold tracking-widest bg-green-50 text-green-600 border-none px-2 py-1">Standard</Badge>
                                <Button 
                                  variant="outline" 
                                  size="sm" 
-                                 className="h-8 text-[10px] font-bold rounded-lg gap-2 border-slate-200 hover:bg-primary/5 hover:text-primary hover:border-primary/20 transition-all"
+                                 className="h-8 text-[10px] font-bold rounded-lg gap-2 border-slate-200 hover:bg-primary/5 hover:text-primary transition-all"
                                  onClick={() => generateSecureLink(user.id)}
                                >
-                                 Generate Secure Link
+                                 Secure Link
                                </Button>
                             </div>
                          </div>
                        ))}
+                       {users.filter((u: any) => u.role === 'user').length === 0 && (
+                         <div className="p-12 text-center text-slate-400">
+                            <Users size={32} className="mx-auto mb-3 opacity-20" />
+                            <p className="text-xs font-bold uppercase tracking-widest">No customers found</p>
+                         </div>
+                       )}
                     </div>
                     {userPagination && userPagination.totalPages > 1 && (
                       <div className="px-6 py-4 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between">

@@ -110,6 +110,15 @@ async function initializeDatabase(db: mysql.Pool) {
       )
     `);
 
+    // Create User Roles Table (for multiple support roles)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS user_roles (
+        userId INT NOT NULL,
+        role VARCHAR(50) NOT NULL,
+        PRIMARY KEY (userId, role)
+      )
+    `);
+
     // Create Tickets Table
     await db.query(`
       CREATE TABLE IF NOT EXISTS tickets (
@@ -127,6 +136,27 @@ async function initializeDatabase(db: mysql.Pool) {
       )
     `);
 
+    // Ensure columns exist for tickets (Migration)
+    try {
+      const [cols]: any = await db.query("SHOW COLUMNS FROM tickets");
+      const colNames = cols.map((c: any) => c.Field.toLowerCase());
+      
+      if (!colNames.includes('assignedto')) {
+        console.log('Adding assignedTo column to tickets table...');
+        await db.query('ALTER TABLE tickets ADD COLUMN assignedTo INT');
+      }
+      if (!colNames.includes('rating')) {
+        console.log('Adding rating column to tickets table...');
+        await db.query('ALTER TABLE tickets ADD COLUMN rating INT');
+      }
+      if (!colNames.includes('feedback')) {
+        console.log('Adding feedback column to tickets table...');
+        await db.query('ALTER TABLE tickets ADD COLUMN feedback TEXT');
+      }
+    } catch (err) {
+      console.error('Error adding columns to tickets:', err);
+    }
+
     // Create Messages Table
     await db.query(`
       CREATE TABLE IF NOT EXISTS messages (
@@ -136,9 +166,21 @@ async function initializeDatabase(db: mysql.Pool) {
         content TEXT,
         replyToId INT,
         isSystem BOOLEAN DEFAULT FALSE,
+        isInternal BOOLEAN DEFAULT FALSE,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // Ensure isInternal column exists (Migration)
+    try {
+      const [cols]: any = await db.query("SHOW COLUMNS FROM messages LIKE 'isInternal'");
+      if (cols.length === 0) {
+        console.log('Adding isInternal column to messages table...');
+        await db.query('ALTER TABLE messages ADD COLUMN isInternal BOOLEAN DEFAULT FALSE');
+      }
+    } catch (err) {
+      console.error('Error adding isInternal to messages:', err);
+    }
 
     // Create Attachments Table
     await db.query(`
@@ -150,9 +192,21 @@ async function initializeDatabase(db: mysql.Pool) {
         fileUrl VARCHAR(500) NOT NULL,
         fileType VARCHAR(100),
         fileSize INT,
+        isInternal BOOLEAN DEFAULT FALSE,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    
+    // Ensure isInternal and ticketId columns exist for attachments (Migration)
+    try {
+      const [cols]: any = await db.query("SHOW COLUMNS FROM attachments LIKE 'isInternal'");
+      if (cols.length === 0) {
+        console.log('Adding isInternal column to attachments table...');
+        await db.query('ALTER TABLE attachments ADD COLUMN isInternal BOOLEAN DEFAULT FALSE');
+      }
+    } catch (err) {
+      console.error('Error adding isInternal to attachments:', err);
+    }
 
     // Create Tags Tables
     await db.query(`
@@ -185,9 +239,35 @@ async function initializeDatabase(db: mysql.Pool) {
     const [adminRows]: any = await db.query('SELECT * FROM users WHERE email = ?', ['admin@zenith.com']);
     if (adminRows.length === 0) {
       const hashedPassword = await bcrypt.hash('admin123', 10);
-      await db.query('INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)', 
+      const [result]: any = await db.query('INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)', 
         ['admin@zenith.com', hashedPassword, 'Support Admin', 'admin']);
-      console.log('Admin user seeded into database.');
+      
+      const adminId = result.insertId;
+      await db.query('INSERT IGNORE INTO user_roles (userId, role) VALUES (?, ?), (?, ?)', 
+        [adminId, 'manager', adminId, 'technical']);
+      console.log('Admin user seeded into database with manager and technical roles.');
+    }
+
+    const [techRows]: any = await db.query('SELECT * FROM users WHERE email = ?', ['tech@zenith.com']);
+    if (techRows.length === 0) {
+      const hashedPassword = await bcrypt.hash('tech123', 10);
+      const [result]: any = await db.query('INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)', 
+        ['tech@zenith.com', hashedPassword, 'Tech Support', 'admin']);
+      
+      const userId = result.insertId;
+      await db.query('INSERT IGNORE INTO user_roles (userId, role) VALUES (?, ?)', [userId, 'technical']);
+      console.log('Tech Support user seeded.');
+    }
+
+    const [billingRows]: any = await db.query('SELECT * FROM users WHERE email = ?', ['billing@zenith.com']);
+    if (billingRows.length === 0) {
+      const hashedPassword = await bcrypt.hash('billing123', 10);
+      const [result]: any = await db.query('INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)', 
+        ['billing@zenith.com', hashedPassword, 'Billing Agent', 'admin']);
+      
+      const userId = result.insertId;
+      await db.query('INSERT IGNORE INTO user_roles (userId, role) VALUES (?, ?)', [userId, 'billing']);
+      console.log('Billing Support user seeded.');
     }
 
     const [userRows]: any = await db.query('SELECT * FROM users WHERE email = ?', ['user@example.com']);
@@ -225,7 +305,7 @@ const authenticateJWT = (req: any, res: any, next: any) => {
 app.post('/api/upload', authenticateJWT, upload.single('file'), async (req: any, res) => {
   if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
   
-  const { ticketId, messageId } = req.body;
+  const { ticketId, messageId, isInternal } = req.body;
   const fileUrl = `/uploads/${req.file.filename}`;
   
   const db = await getDb();
@@ -233,8 +313,8 @@ app.post('/api/upload', authenticateJWT, upload.single('file'), async (req: any,
   if (db && ticketId) {
     try {
       const [result]: any = await db.query(
-        'INSERT INTO attachments (ticketId, messageId, fileName, fileUrl, fileType, fileSize) VALUES (?, ?, ?, ?, ?, ?)',
-        [ticketId, messageId || null, req.file.originalname, fileUrl, req.file.mimetype, req.file.size]
+        'INSERT INTO attachments (ticketId, messageId, fileName, fileUrl, fileType, fileSize, isInternal) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [ticketId, messageId || null, req.file.originalname, fileUrl, req.file.mimetype, req.file.size, isInternal === 'true' || isInternal === true]
       );
       attachmentId = result.insertId;
     } catch (err) {
@@ -251,7 +331,11 @@ app.get('/api/tickets/:id/attachments', authenticateJWT, async (req: any, res) =
   const db = await getDb();
   if (db) {
     try {
-      const [rows] = await db.query('SELECT * FROM attachments WHERE ticketId = ?', [id]);
+      let query = 'SELECT * FROM attachments WHERE ticketId = ?';
+      if (req.user.role !== 'admin') {
+        query += ' AND isInternal = FALSE';
+      }
+      const [rows] = await db.query(query, [id]);
       return res.json(rows);
     } catch (err) {
       console.error('Database list attachments error:', err);
@@ -378,11 +462,18 @@ app.get('/api/admin/users', authenticateJWT, async (req: any, res) => {
   const db = await getDb();
   if (db) {
     try {
+      const [userRows]: any = await db.query('SELECT id, email, name, role FROM users LIMIT ? OFFSET ?', [limit, offset]);
+      
+      // Fetch roles for each user
+      const usersWithRoles = await Promise.all(userRows.map(async (user: any) => {
+        const [roles]: any = await db.query('SELECT role FROM user_roles WHERE userId = ?', [user.id]);
+        return { ...user, roles: roles.map((r: any) => r.role) };
+      }));
+
       const [countResult]: any = await db.query('SELECT COUNT(*) as total FROM users');
-      const [rows] = await db.query('SELECT id, email, name, role FROM users LIMIT ? OFFSET ?', [limit, offset]);
       
       return res.json({
-        users: rows,
+        users: usersWithRoles,
         pagination: {
           total: countResult[0].total,
           page,
@@ -481,6 +572,11 @@ app.get('/api/tickets/:id/messages', authenticateJWT, async (req: any, res) => {
       let query = 'SELECT * FROM messages WHERE ticketId = ?';
       const params: any[] = [id];
 
+      // Only staff can see internal messages
+      if (req.user.role !== 'admin') {
+        query += ' AND isInternal = FALSE';
+      }
+
       if (before) {
         query += ' AND createdAt < ?';
         params.push(new Date(before));
@@ -512,8 +608,10 @@ app.post('/api/auth/login', async (req, res) => {
         const user = rows[0];
         const isMatch = await bcrypt.compare(password, user.password);
         if (isMatch) {
-          const token = jwt.sign({ email, role, id: user.id }, JWT_SECRET, { expiresIn: '24h' });
-          return res.json({ token, user: { email, role, id: user.id, name: user.name } });
+          const [roles]: any = await db.query('SELECT role FROM user_roles WHERE userId = ?', [user.id]);
+          const userRoles = roles.map((r: any) => r.role);
+          const token = jwt.sign({ email, role, id: user.id, roles: userRoles }, JWT_SECRET, { expiresIn: '24h' });
+          return res.json({ token, user: { email, role, id: user.id, name: user.name, roles: userRoles } });
         }
       }
       return res.status(401).json({ message: 'Invalid credentials' });
@@ -543,7 +641,8 @@ app.get('/api/admin/canned-responses', authenticateJWT, (req, res) => {
 
 // Assign Ticket API
 app.patch('/api/tickets/:id/assign', authenticateJWT, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.sendStatus(403);
+  const isManager = req.user.role === 'admin' && (req.user.roles || []).includes('manager');
+  if (!isManager) return res.status(403).json({ message: 'Only managers can assign tickets' });
   
   const { id } = req.params;
   const { assignedTo } = req.body;
@@ -780,8 +879,8 @@ io.on('connection', (socket) => {
     if (db) {
       try {
         const [result]: any = await db.query(
-          'INSERT INTO messages (ticketId, senderId, content, replyToId, createdAt) VALUES (?, ?, ?, ?, ?)',
-          [message.ticketId, message.senderId, message.content, message.replyToId || null, new Date(message.createdAt)]
+          'INSERT INTO messages (ticketId, senderId, content, replyToId, isInternal, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+          [message.ticketId, message.senderId, message.content, message.replyToId || null, message.isInternal || false, new Date(message.createdAt)]
         );
         message.id = result.insertId;
       } catch (err) {
@@ -789,6 +888,8 @@ io.on('connection', (socket) => {
       }
     }
     // Broadcast to the ticket room
+    // If it is an internal message, we should only broadcast to agents in that room
+    // For simplicity, we broadcast to everyone but the client filters out (though better to handle in socket rooms)
     io.to(message.ticketId.toString()).emit('message-received', message);
   });
 

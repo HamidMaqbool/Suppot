@@ -8,6 +8,7 @@ export interface User {
   email: string;
   avatar?: string;
   role: 'user' | 'admin';
+  roles?: string[];
 }
 
 export interface Message {
@@ -19,6 +20,7 @@ export interface Message {
   attachments?: string[];
   replyToId?: number | string;
   isSystem?: boolean;
+  isInternal?: boolean;
 }
 
 export interface Ticket {

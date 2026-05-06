@@ -94,6 +94,7 @@ export default function TicketDetailView({ portal }: Props) {
   const [isNewTicketOpen, setIsNewTicketOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isInternal, setIsInternal] = useState(false);
   const [newTicket, setNewTicket] = useState({ subject: '', category: 'Technical', message: '' });
   
   const [hasMore, setHasMore] = useState(true);
@@ -316,6 +317,9 @@ export default function TicketDetailView({ portal }: Props) {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('ticketId', id!);
+        if (portal === 'admin' && isInternal) {
+          formData.append('isInternal', 'true');
+        }
         
         setUploadProgress(Math.round(((i) / totalFiles) * 100));
         
@@ -338,6 +342,7 @@ export default function TicketDetailView({ portal }: Props) {
         senderId: user?.id || 'unknown',
         content: newMessage,
         replyToId: replyingTo?.id,
+        isInternal: portal === 'admin' ? isInternal : false,
         createdAt: new Date().toISOString(),
         attachments: uploadedUrls,
       };
@@ -347,6 +352,7 @@ export default function TicketDetailView({ portal }: Props) {
       setNewMessage('');
       setReplyingTo(null);
       setAttachments([]);
+      setIsInternal(false);
       setUploadProgress(0);
       socket.emit('typing', { ticketId: id, userId: user?.id, isTyping: false });
     } catch (err) {
@@ -377,6 +383,30 @@ export default function TicketDetailView({ portal }: Props) {
   const removeAttachment = (index: number) => {
     setAttachments(attachments.filter((_, i) => i !== index));
   };
+
+  const [admins, setAdmins] = useState<any[]>([]);
+  const [isAssigning, setIsAssigning] = useState(false);
+
+  const isManager = user?.role === 'admin' && (user as any)?.roles?.includes('manager');
+
+  useEffect(() => {
+    const fetchAdmins = async () => {
+      if (portal === 'admin' && token) {
+        try {
+          const res = await fetch('/api/admin/users?limit=100', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setAdmins(data.users.filter((u: any) => u.role === 'admin'));
+          }
+        } catch (err) {
+          console.error('Failed to fetch admins:', err);
+        }
+      }
+    };
+    fetchAdmins();
+  }, [portal, token]);
 
   if (isLoading) {
     return (
@@ -481,28 +511,6 @@ export default function TicketDetailView({ portal }: Props) {
       toast.error('Connection error');
     }
   };
-
-  const [admins, setAdmins] = useState<any[]>([]);
-  const [isAssigning, setIsAssigning] = useState(false);
-
-  useEffect(() => {
-    const fetchAdmins = async () => {
-      if (portal === 'admin' && token) {
-        try {
-          const res = await fetch('/api/admin/users?limit=100', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setAdmins(data.users.filter((u: any) => u.role === 'admin'));
-          }
-        } catch (err) {
-          console.error('Failed to fetch admins:', err);
-        }
-      }
-    };
-    fetchAdmins();
-  }, [portal, token]);
 
   const handleAssignTicket = async (adminId: number) => {
     setIsAssigning(true);
@@ -788,8 +796,18 @@ export default function TicketDetailView({ portal }: Props) {
                     </Avatar>
                     <div className={`max-w-[75%] space-y-2 ${isMe ? 'text-right' : ''}`}>
                       <div className={`flex items-center gap-2 mb-1 ${isMe ? 'flex-row-reverse' : ''}`}>
-                        <span className="text-xs font-bold text-slate-900">{sender?.name}</span>
+                        <span className="text-xs font-bold text-slate-900">
+                          {sender?.name}
+                          {(sender as any)?.roles && (sender as any).roles.length > 0 && (
+                            <span className="ml-2 text-[8px] px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded-full font-black uppercase tracking-tighter align-middle">
+                              {(sender as any).roles.join(' / ')}
+                            </span>
+                          )}
+                        </span>
                         <span className="text-[10px] text-slate-400 font-medium">{msg.createdAt ? format(new Date(msg.createdAt), 'h:mm a') : 'Now'}</span>
+                        {msg.isInternal && (
+                          <span className="text-[8px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-black uppercase tracking-tighter">Internal Note</span>
+                        )}
                       </div>
                       
                       <div className="relative">
@@ -809,8 +827,8 @@ export default function TicketDetailView({ portal }: Props) {
                         )}
                         <div className={`p-4 rounded-2xl text-sm leading-relaxed relative ${
                           isMe 
-                            ? 'bg-slate-900 text-white rounded-tr-none' 
-                            : 'bg-white text-slate-700 border border-slate-200 shadow-sm rounded-tl-none'
+                            ? (msg.isInternal ? 'bg-yellow-50 text-slate-900 border-2 border-yellow-200 shadow-sm' : 'bg-slate-900 text-white rounded-tr-none') 
+                            : (msg.isInternal ? 'bg-yellow-50 text-slate-900 border-2 border-yellow-200 shadow-sm' : 'bg-white text-slate-700 border border-slate-200 shadow-sm rounded-tl-none')
                         }`}>
                           {msg.content}
                           {msg.attachments && msg.attachments.length > 0 && (
@@ -1029,9 +1047,9 @@ export default function TicketDetailView({ portal }: Props) {
                     </div>
                   )}
                   <Textarea 
-                    placeholder={ticket.rating ? "Ticket is finalized. Feedback submitted." : `Reply as ${portal === 'user' ? 'Customer' : 'Support Specialist'}...`}
+                    placeholder={ticket.rating ? "Ticket is finalized. Feedback submitted." : (isInternal ? "Add a private internal note..." : `Reply as ${portal === 'user' ? 'Customer' : 'Support Specialist'}...`)}
                     readOnly={!!ticket.rating}
-                    className="bg-transparent border-none focus-visible:ring-0 min-h-[120px] resize-none pb-12"
+                    className={`bg-transparent border-none focus-visible:ring-0 min-h-[120px] resize-none pb-12 transition-colors ${isInternal ? 'placeholder:text-yellow-600/50' : ''}`}
                     value={newMessage}
                     onChange={(e) => onTyping(e.target.value)}
                     onKeyDown={(e) => {
@@ -1095,6 +1113,17 @@ export default function TicketDetailView({ portal }: Props) {
                         </div>
                      </div>
                      <div className="flex items-center gap-3">
+                        {portal === 'admin' && (
+                          <div className="flex items-center gap-2 mr-2">
+                            <div 
+                              className={`flex items-center gap-2 px-3 py-1.5 rounded-full cursor-pointer transition-all ${isInternal ? 'bg-yellow-100 text-yellow-700 font-extrabold border border-yellow-200 shadow-sm' : 'bg-slate-100 text-slate-500 border border-slate-200 opacity-60 hover:opacity-100'}`}
+                              onClick={() => setIsInternal(!isInternal)}
+                            >
+                              <ShieldAlert size={14} className={isInternal ? 'text-yellow-600' : 'text-slate-400'} />
+                              <span className="text-[9px] uppercase tracking-widest">Internal Note</span>
+                            </div>
+                          </div>
+                        )}
                         <Button 
                           size="sm" 
                           onClick={handleSendMessage}
@@ -1180,7 +1209,7 @@ export default function TicketDetailView({ portal }: Props) {
                      </div>
                    </section>
     
-                   {portal === 'admin' && (
+                   {portal === 'admin' && isManager && (
                      <section className="pt-6 border-t border-slate-100">
                         <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-4">Internal Controls</h4>
                         <div className="grid grid-cols-2 gap-2">
@@ -1198,14 +1227,20 @@ export default function TicketDetailView({ portal }: Props) {
                                    <Avatar className="w-5 h-5">
                                       <AvatarImage src={user?.avatar} />
                                    </Avatar>
-                                   Assign to me
+                                   <div className="flex flex-col">
+                                      <span>Assign to me</span>
+                                      <span className="text-[8px] text-slate-400 font-bold uppercase tracking-tight">{(user as any)?.roles?.join(' • ') || 'Agent'}</span>
+                                   </div>
                                 </DropdownMenuItem>
                                 {admins.filter(a => a.id !== user?.id).map((admin) => (
                                   <DropdownMenuItem key={admin.id} onClick={() => handleAssignTicket(admin.id)} className="rounded-lg text-xs gap-2 cursor-pointer focus:bg-primary/5 focus:text-primary">
                                      <Avatar className="w-5 h-5">
                                         <AvatarImage src={admin.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${admin.id}`} />
                                      </Avatar>
-                                     {admin.name}
+                                     <div className="flex flex-col">
+                                        <span>{admin.name}</span>
+                                        <span className="text-[8px] text-slate-400 font-bold uppercase tracking-tight">{admin.roles?.join(' • ') || 'Agent'}</span>
+                                     </div>
                                   </DropdownMenuItem>
                                 ))}
                              </DropdownMenuContent>
