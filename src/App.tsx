@@ -11,6 +11,7 @@ import AdminDashboard from './components/admin/AdminDashboard';
 import TicketDetailView from './components/shared/TicketDetailView';
 import LandingPage from './components/LandingPage';
 import LoginView from './components/LoginView';
+import SecureLoginView from './components/SecureLoginView';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 
 function ProtectedRoute({ children, role }: { children: React.ReactNode, role?: 'user' | 'admin' }) {
@@ -29,6 +30,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginView />} />
+          <Route path="/secure-login/:token" element={<SecureLoginView />} />
           
           {/* User Portal */}
           <Route path="/user" element={<ProtectedRoute role="user"><UserDashboard /></ProtectedRoute>} />

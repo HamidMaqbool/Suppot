@@ -39,10 +39,48 @@ export default function AdminDashboard() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [users, setUsers] = useState<any[]>([]);
 
   useEffect(() => {
     fetchTickets();
-  }, [token]);
+    if (activeTab === 'customers') {
+      fetchUsers();
+    }
+  }, [token, activeTab]);
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch('/api/admin/users', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setUsers(await res.json());
+      }
+    } catch (err) {
+      console.error('Fetch users error:', err);
+    }
+  };
+
+  const generateSecureLink = async (userId: string) => {
+    try {
+      const res = await fetch('/api/auth/secure-link', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ userId })
+      });
+      if (res.ok) {
+        const { token: secureToken } = await res.json();
+        const link = `${window.location.origin}/secure-login/${secureToken}`;
+        navigator.clipboard.writeText(link);
+        toast.success('Secure link copied to clipboard!');
+      }
+    } catch (err) {
+      console.error('Secure link error:', err);
+    }
+  };
 
   const fetchTickets = async () => {
     setIsLoading(true);
@@ -312,6 +350,44 @@ export default function AdminDashboard() {
                           </motion.div>
                         ))}
                      </div>
+                  </div>
+                </>
+              ) : activeTab === 'customers' ? (
+                <>
+                  <header className="mb-8">
+                    <h2 className="text-2xl font-bold text-slate-900 mb-1">Customer Management</h2>
+                    <p className="text-slate-500 text-sm">Directory of all registered customers and service level identifiers.</p>
+                  </header>
+                  
+                  <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xl shadow-slate-200/50">
+                    <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                       <h3 className="font-bold text-slate-800 text-sm uppercase tracking-tight">User Directory</h3>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                       {users.map((user) => (
+                         <div key={user.id} className="flex items-center px-6 py-4 hover:bg-slate-50 transition-colors">
+                            <Avatar className="w-10 h-10 rounded-xl mr-4">
+                               <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`} />
+                               <AvatarFallback>{user.name[0]}</AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1">
+                               <p className="font-bold text-slate-900 text-sm">{user.name}</p>
+                               <p className="text-xs text-slate-500">{user.email}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                               <Badge variant="outline" className="uppercase text-[9px] font-bold tracking-widest">{user.role}</Badge>
+                               <Button 
+                                 variant="outline" 
+                                 size="sm" 
+                                 className="h-8 text-[10px] font-bold rounded-lg gap-2 border-slate-200 hover:bg-primary/5 hover:text-primary hover:border-primary/20"
+                                 onClick={() => generateSecureLink(user.id)}
+                               >
+                                 Generate Secure Link
+                               </Button>
+                            </div>
+                         </div>
+                       ))}
+                    </div>
                   </div>
                 </>
               ) : (

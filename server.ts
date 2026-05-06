@@ -9,6 +9,8 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import multer from 'multer';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -24,8 +26,25 @@ const io = new Server(httpServer, {
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-key';
 
+// --- Multer Configuration ---
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadPath = path.join(process.cwd(), 'uploads');
+    if (!fs.existsSync(uploadPath)) {
+      fs.mkdirSync(uploadPath);
+    }
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
+  }
+});
+const upload = multer({ storage });
+
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // --- Database Logic ---
 let pool: mysql.Pool | null = null;
@@ -97,6 +116,47 @@ async function initializeDatabase(db: mysql.Pool) {
       )
     `);
 
+    // Create Attachments Table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS attachments (
+        id VARCHAR(36) PRIMARY KEY,
+        ticketId VARCHAR(36) NOT NULL,
+        messageId VARCHAR(36),
+        fileName VARCHAR(255) NOT NULL,
+        fileUrl VARCHAR(500) NOT NULL,
+        fileType VARCHAR(100),
+        fileSize INT,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create Tags Tables
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS tags (
+        id VARCHAR(36) PRIMARY KEY,
+        name VARCHAR(50) UNIQUE NOT NULL,
+        color VARCHAR(20) DEFAULT '#000000'
+      )
+    `);
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS ticket_tags (
+        ticketId VARCHAR(36) NOT NULL,
+        tagId VARCHAR(36) NOT NULL,
+        PRIMARY KEY (ticketId, tagId)
+      )
+    `);
+
+    // Create Secure Links Table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS secure_links (
+        token VARCHAR(128) PRIMARY KEY,
+        userId VARCHAR(36) NOT NULL,
+        expiresAt TIMESTAMP NOT NULL,
+        used BOOLEAN DEFAULT FALSE
+      )
+    `);
+
     // Seed Demo Users
     const [adminRows]: any = await db.query('SELECT * FROM users WHERE email = ?', ['admin@zenith.com']);
     if (adminRows.length === 0) {
@@ -134,6 +194,168 @@ const authenticateJWT = (req: any, res: any, next: any) => {
 };
 
 // --- API Routes ---
+
+// File Upload API
+app.post('/api/upload', authenticateJWT, upload.single('file'), async (req: any, res) => {
+  if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+  
+  const { ticketId, messageId } = req.body;
+  const fileUrl = `/uploads/${req.file.filename}`;
+  const attachmentId = Math.random().toString(36).substr(2, 9);
+  
+  const db = await getDb();
+  if (db && ticketId) {
+    try {
+      await db.query(
+        'INSERT INTO attachments (id, ticketId, messageId, fileName, fileUrl, fileType, fileSize) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [attachmentId, ticketId, messageId || null, req.file.originalname, fileUrl, req.file.mimetype, req.file.size]
+      );
+    } catch (err) {
+      console.error('Database attachment error:', err);
+    }
+  }
+  
+  res.json({ id: attachmentId, url: fileUrl, fileName: req.file.originalname });
+});
+
+// List Attachments API
+app.get('/api/tickets/:id/attachments', authenticateJWT, async (req: any, res) => {
+  const { id } = req.params;
+  const db = await getDb();
+  if (db) {
+    try {
+      const [rows] = await db.query('SELECT * FROM attachments WHERE ticketId = ?', [id]);
+      return res.json(rows);
+    } catch (err) {
+      console.error('Database list attachments error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  res.json([]);
+});
+
+// Tags API
+app.get('/api/tags', authenticateJWT, async (req: any, res) => {
+  const db = await getDb();
+  if (db) {
+    try {
+      const [rows] = await db.query('SELECT * FROM tags');
+      return res.json(rows);
+    } catch (err) {
+      console.error('Database list tags error:', err);
+    }
+  }
+  res.json([{ id: 't1', name: 'Billing', color: '#3b82f6' }, { id: 't2', name: 'Technical', color: '#ef4444' }]);
+});
+
+app.post('/api/tickets/:id/tags', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  const { id } = req.params;
+  const { tagName, color } = req.body;
+  
+  const db = await getDb();
+  if (db) {
+    try {
+      let tagId;
+      const [tagRows]: any = await db.query('SELECT id FROM tags WHERE name = ?', [tagName]);
+      if (tagRows.length > 0) {
+        tagId = tagRows[0].id;
+      } else {
+        tagId = Math.random().toString(36).substr(2, 9);
+        await db.query('INSERT INTO tags (id, name, color) VALUES (?, ?, ?)', [tagId, tagName, color || '#3b82f6']);
+      }
+      
+      await db.query('REPLACE INTO ticket_tags (ticketId, tagId) VALUES (?, ?)', [id, tagId]);
+      return res.json({ id: tagId, name: tagName, color: color || '#3b82f6' });
+    } catch (err) {
+      console.error('Database add tag error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  res.json({ message: 'Tag added (demo mode)' });
+});
+
+app.get('/api/tickets/:id/tags', authenticateJWT, async (req: any, res) => {
+  const { id } = req.params;
+  const db = await getDb();
+  if (db) {
+    try {
+      const [rows] = await db.query(`
+        SELECT t.* FROM tags t
+        JOIN ticket_tags tt ON t.id = tt.tagId
+        WHERE tt.ticketId = ?
+      `, [id]);
+      return res.json(rows);
+    } catch (err) {
+      console.error('Database list ticket tags error:', err);
+    }
+  }
+  res.json([]);
+});
+
+// Secure Login API
+app.post('/api/auth/secure-link', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  const { userId } = req.body;
+  
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24); // 24 hours
+  
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.query('INSERT INTO secure_links (token, userId, expiresAt) VALUES (?, ?, ?)', [token, userId, expiresAt]);
+      return res.json({ token });
+    } catch (err) {
+      console.error('Database secure link error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  res.json({ token: 'mock-secure-token' });
+});
+
+app.post('/api/auth/login-secure', async (req, res) => {
+  const { token } = req.body;
+  
+  const db = await getDb();
+  if (db) {
+    try {
+      const [rows]: any = await db.query(`
+        SELECT u.*, sl.expiresAt, sl.used 
+        FROM users u
+        JOIN secure_links sl ON u.id = sl.userId
+        WHERE sl.token = ? AND sl.expiresAt > NOW() AND sl.used = FALSE
+      `, [token]);
+      
+      if (rows.length > 0) {
+        const user = rows[0];
+        await db.query('UPDATE secure_links SET used = TRUE WHERE token = ?', [token]);
+        const jwtToken = jwt.sign({ email: user.email, role: user.role, id: user.id }, JWT_SECRET, { expiresIn: '24h' });
+        return res.json({ token: jwtToken, user: { email: user.email, role: user.role, id: user.id, name: user.name } });
+      }
+    } catch (err) {
+      console.error('Database secure login error:', err);
+    }
+  }
+  res.status(401).json({ message: 'Invalid or expired secure link' });
+});
+
+// User Management API
+app.get('/api/admin/users', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  
+  const db = await getDb();
+  if (db) {
+    try {
+      const [rows] = await db.query('SELECT id, email, name, role FROM users');
+      return res.json(rows);
+    } catch (err) {
+      console.error('Database list users error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  res.json([]);
+});
 
 // Create Ticket API
 app.post('/api/tickets', authenticateJWT, async (req: any, res) => {

@@ -19,17 +19,14 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-
-  useEffect(() => {
-    const savedToken = localStorage.getItem('zenith_token');
+  const [user, setUser] = useState<User | null>(() => {
     const savedUser = localStorage.getItem('zenith_user');
-    if (savedToken && savedUser) {
-      setToken(savedToken);
-      setUser(JSON.parse(savedUser));
-    }
-  }, []);
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
+  const [token, setToken] = useState<string | null>(() => {
+    return localStorage.getItem('zenith_token');
+  });
+  const [isLoading, setIsLoading] = useState(false);
 
   const login = (newToken: string, newUser: User) => {
     setToken(newToken);

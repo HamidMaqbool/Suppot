@@ -58,6 +58,11 @@ export default function TicketDetailView({ portal }: Props) {
   const [isOtherTyping, setIsOtherTyping] = useState(false);
   const [cannedResponses, setCannedResponses] = useState<CannedResponse[]>([]);
   const [showCanned, setShowCanned] = useState(false);
+  const [ticketTags, setTicketTags] = useState<{id: string, name: string, color: string}[]>([]);
+  const [availableTags, setAvailableTags] = useState<{id: string, name: string, color: string}[]>([]);
+  const [showTags, setShowTags] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [ticketAttachments, setTicketAttachments] = useState<any[]>([]);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -85,6 +90,24 @@ export default function TicketDetailView({ portal }: Props) {
           const messagesData = await messagesRes.json();
           setMessages(messagesData);
         }
+
+        // Fetch Tags
+        const tagsRes = await fetch(`/api/tickets/${id}/tags`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (tagsRes.ok) setTicketTags(await tagsRes.json());
+
+        const availTagsRes = await fetch('/api/tags', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (availTagsRes.ok) setAvailableTags(await availTagsRes.json());
+        
+        // Fetch Attachments
+        const attachRes = await fetch(`/api/tickets/${id}/attachments`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (attachRes.ok) setTicketAttachments(await attachRes.json());
+
       } catch (err) {
         console.error('Fetch ticket detail error:', err);
         toast.error('Failed to load conversation');
@@ -140,27 +163,51 @@ export default function TicketDetailView({ portal }: Props) {
     }
   }, [messages]);
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!newMessage.trim() && attachments.length === 0) return;
+    setUploading(true);
 
-    const msg: Message = {
-      id: Math.random().toString(36).substr(2, 9),
-      ticketId: id!,
-      senderId: user?.id || 'unknown',
-      content: newMessage,
-      replyToId: replyingTo?.id,
-      createdAt: new Date().toISOString(),
-      attachments: attachments.map(f => f.name),
-    };
+    let uploadedUrls: string[] = [];
+    try {
+      for (const file of attachments) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('ticketId', id!);
+        
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData
+        });
+        if (res.ok) {
+          const data = await res.json();
+          uploadedUrls.push(data.url);
+          setTicketAttachments(prev => [...prev, data]);
+        }
+      }
 
-    socket.emit('new-message', msg);
-    setMessages(prev => [...prev, msg]);
-    setNewMessage('');
-    setReplyingTo(null);
-    setAttachments([]);
-    
-    // Stop typing indicator on send
-    socket.emit('typing', { ticketId: id, userId: user?.id, isTyping: false });
+      const msg: Message = {
+        id: Math.random().toString(36).substr(2, 9),
+        ticketId: id!,
+        senderId: user?.id || 'unknown',
+        content: newMessage,
+        replyToId: replyingTo?.id,
+        createdAt: new Date().toISOString(),
+        attachments: uploadedUrls,
+      };
+
+      socket.emit('new-message', msg);
+      setMessages(prev => [...prev, msg]);
+      setNewMessage('');
+      setReplyingTo(null);
+      setAttachments([]);
+      socket.emit('typing', { ticketId: id, userId: user?.id, isTyping: false });
+    } catch (err) {
+      console.error('Send message error:', err);
+      toast.error('Failed to send message');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const onTyping = (text: string) => {
@@ -195,7 +242,28 @@ export default function TicketDetailView({ portal }: Props) {
     );
   }
 
-const handleResolveTicket = async () => {
+  const handleAddTag = async (tagName: string) => {
+    try {
+      const res = await fetch(`/api/tickets/${id}/tags`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ tagName })
+      });
+      if (res.ok) {
+        const newTag = await res.json();
+        setTicketTags(prev => [...prev.filter(t => t.name !== tagName), newTag]);
+        toast.success(`Tag "${tagName}" applied`);
+        setShowTags(false);
+      }
+    } catch (err) {
+      console.error('Add tag error:', err);
+    }
+  };
+
+  const handleResolveTicket = async () => {
     try {
       const res = await fetch(`/api/tickets/${id}/status`, {
         method: 'PATCH',
@@ -210,7 +278,8 @@ const handleResolveTicket = async () => {
         toast.success('Ticket marked as Resolved');
         setTicket(prev => prev ? { ...prev, status: 'resolved' } : null);
       } else {
-        toast.error('Failed to resolve ticket');
+        const errorData = await res.json();
+        toast.error(errorData.message || 'Failed to resolve ticket');
       }
     } catch (err) {
       console.error('Resolve error:', err);
@@ -315,7 +384,13 @@ const handleResolveTicket = async () => {
                                {msg.attachments.map((file, idx) => (
                                  <div key={idx} className={`flex items-center gap-2 p-2 rounded-lg text-xs ${isMe ? 'bg-white/10' : 'bg-slate-50 border border-slate-100'}`}>
                                     <FileText size={14} />
-                                    <span>{file}</span>
+                                    {file.startsWith('/') ? (
+                                      <a href={file} target="_blank" rel="noopener noreferrer" className="hover:underline flex-1 truncate max-w-[150px]">
+                                        {file.split('-').pop() || file}
+                                      </a>
+                                    ) : (
+                                      <span className="flex-1 truncate max-w-[150px]">{file}</span>
+                                    )}
                                  </div>
                                ))}
                             </div>
@@ -439,7 +514,34 @@ const handleResolveTicket = async () => {
                           <MessageSquareQuote size={20} />
                         </Button>
                       )}
-                      <Button variant="ghost" size="icon" className="w-9 h-9 text-slate-400 hover:text-primary rounded-xl"><Tag size={20} /></Button>
+                      <div className="relative">
+                         <Button 
+                           variant="ghost" 
+                           size="icon" 
+                           className={`w-9 h-9 rounded-xl transition-colors ${showTags ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:text-primary'}`}
+                           onClick={() => setShowTags(!showTags)}
+                         >
+                           <Tag size={20} />
+                         </Button>
+                         
+                         {showTags && (
+                           <div className="absolute bottom-full left-0 mb-4 w-40 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden">
+                              <div className="p-2 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Add Tag</div>
+                              <div className="p-1">
+                                 {['Bug', 'Billing', 'Security', 'Feature', 'Support'].map(tag => (
+                                   <button 
+                                     key={tag}
+                                     onClick={() => handleAddTag(tag)}
+                                     className="w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-slate-50 rounded-lg flex items-center justify-between"
+                                   >
+                                      {tag}
+                                      {ticketTags.some(t => t.name === tag) && <CheckCircle2 size={12} className="text-primary" />}
+                                   </button>
+                                 ))}
+                              </div>
+                           </div>
+                         )}
+                      </div>
                    </div>
                    <div className="flex items-center gap-3">
                       <Button 
@@ -498,6 +600,15 @@ const handleResolveTicket = async () => {
                        <span className="text-xs text-slate-500 flex items-center gap-2"><Tag size={12} /> Category</span>
                        <span className="text-xs font-bold text-slate-700">{ticket.category}</span>
                     </div>
+                    {ticketTags.length > 0 && (
+                      <div className="pt-2 flex flex-wrap gap-1.5">
+                        {ticketTags.map(tag => (
+                          <Badge key={tag.id} className="bg-slate-100 text-slate-600 border-none text-[10px] uppercase font-bold py-0.5 px-2">
+                             {tag.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                  </div>
                </section>
 
@@ -520,14 +631,29 @@ const handleResolveTicket = async () => {
 
                <section className="pt-6 border-t border-slate-100">
                  <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-4">Related Assets</h4>
-                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex items-center gap-3 group cursor-pointer hover:bg-slate-100/50 transition-colors">
-                    <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center border border-slate-200 group-hover:border-primary transition-colors">
-                       <UserIcon size={18} className="text-slate-400 group-hover:text-primary" />
-                    </div>
-                    <div>
-                       <p className="text-[10px] font-bold text-slate-900 group-hover:text-primary truncate">error_log_v2.txt</p>
-                       <p className="text-[9px] text-slate-400">1.2 MB • Text Document</p>
-                    </div>
+                 <div className="space-y-3">
+                   {ticketAttachments.length > 0 ? ticketAttachments.map(file => (
+                     <a 
+                       key={file.id} 
+                       href={file.fileUrl} 
+                       target="_blank" 
+                       rel="noopener noreferrer"
+                       className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center gap-3 group cursor-pointer hover:bg-slate-100/50 transition-colors"
+                     >
+                        <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-slate-200 group-hover:border-primary transition-colors">
+                           <FileText size={16} className="text-slate-400 group-hover:text-primary" />
+                        </div>
+                        <div className="min-w-0">
+                           <p className="text-[10px] font-bold text-slate-900 group-hover:text-primary truncate">{file.fileName}</p>
+                           <p className="text-[9px] text-slate-400">{(file.fileSize / 1024).toFixed(1)} KB • {file.fileType.split('/')[1].toUpperCase()}</p>
+                        </div>
+                     </a>
+                   )) : (
+                     <div className="text-center py-6 text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                        <Paperclip size={20} className="mx-auto mb-2 opacity-30" />
+                        <p className="text-[10px] font-bold uppercase tracking-wider">No assets attached</p>
+                     </div>
+                   )}
                  </div>
                </section>
             </div>
