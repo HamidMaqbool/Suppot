@@ -288,8 +288,8 @@ app.post('/api/tickets/:id/tags', authenticateJWT, async (req: any, res) => {
       if (tagRows.length > 0) {
         tagId = tagRows[0].id;
       } else {
-        tagId = Math.random().toString(36).substr(2, 9);
-        await db.query('INSERT INTO tags (id, name, color) VALUES (?, ?, ?)', [tagId, tagName, color || '#3b82f6']);
+        const [result]: any = await db.query('INSERT INTO tags (name, color) VALUES (?, ?)', [tagName, color || '#3b82f6']);
+        tagId = result.insertId;
       }
       
       await db.query('REPLACE INTO ticket_tags (ticketId, tagId) VALUES (?, ?)', [id, tagId]);
@@ -407,7 +407,7 @@ app.post('/api/tickets', authenticateJWT, async (req: any, res) => {
   if (db) {
     try {
       const [result]: any = await db.query(
-        'INSERT INTO tickets (userId, subject, description, category, priority) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO tickets (userId, subject, description, category, priority) VALUES (?, ?, ?, ?, ?)',
         [userId, subject, description, category, priority || 'medium']
       );
       const ticketId = result.insertId;
