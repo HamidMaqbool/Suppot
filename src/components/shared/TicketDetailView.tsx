@@ -195,6 +195,29 @@ export default function TicketDetailView({ portal }: Props) {
     );
   }
 
+const handleResolveTicket = async () => {
+    try {
+      const res = await fetch(`/api/tickets/${id}/status`, {
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ status: 'resolved' })
+      });
+
+      if (res.ok) {
+        toast.success('Ticket marked as Resolved');
+        setTicket(prev => prev ? { ...prev, status: 'resolved' } : null);
+      } else {
+        toast.error('Failed to resolve ticket');
+      }
+    } catch (err) {
+      console.error('Resolve error:', err);
+      toast.error('Connection error');
+    }
+  };
+
   if (!ticket) return <div>Ticket not found</div>;
 
   const requestor = MOCK_USERS.find(u => u.id === ticket.userId) || { name: 'Customer', avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${ticket.userId}`, email: 'customer@example.com' };
@@ -488,7 +511,7 @@ export default function TicketDetailView({ portal }: Props) {
                        <Button variant="outline" size="sm" className="w-full text-[10px] font-bold tracking-tight rounded-lg h-9 border-slate-200" onClick={() => toast.info('Transfer protocols initiated')}>
                           Transfer
                        </Button>
-                       <Button size="sm" className="w-full col-span-2 text-[10px] font-bold tracking-tight rounded-lg h-10 bg-green-600 hover:bg-green-700 shadow-sm" onClick={() => toast.success('Ticket marked as Resolved')}>
+                       <Button size="sm" className="w-full col-span-2 text-[10px] font-bold tracking-tight rounded-lg h-10 bg-green-600 hover:bg-green-700 shadow-sm" onClick={handleResolveTicket}>
                           Resolve Case
                        </Button>
                     </div>

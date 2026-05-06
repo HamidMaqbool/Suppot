@@ -284,6 +284,27 @@ app.patch('/api/tickets/:id/assign', authenticateJWT, async (req: any, res) => {
   res.json({ message: 'Ticket assigned (demo mode)' });
 });
 
+// Update Ticket Status API
+app.patch('/api/tickets/:id/status', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  
+  const { id } = req.params;
+  const { status } = req.body;
+  
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.query('UPDATE tickets SET status = ? WHERE id = ?', [status, id]);
+      return res.json({ message: `Ticket status updated to ${status}` });
+    } catch (err) {
+      console.error('Database status update error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  
+  res.json({ message: 'Status updated (demo mode)' });
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', db: pool ? 'connected' : 'disconnected' });
