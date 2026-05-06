@@ -44,7 +44,10 @@ export default function AdminDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [users, setUsers] = useState<any[]>([]);
+  const [userPagination, setUserPagination] = useState<any>(null);
+  const [userPage, setUserPage] = useState(1);
   const [feedbackData, setFeedbackData] = useState<any>(null);
+  const [feedbackPage, setFeedbackPage] = useState(1);
 
   const playSound = () => {
     const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
@@ -72,16 +75,16 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchTickets();
     if (activeTab === 'customers') {
-      fetchUsers();
+      fetchUsers(userPage);
     }
     if (activeTab === 'feedback') {
-      fetchFeedbackStats();
+      fetchFeedbackStats(feedbackPage);
     }
-  }, [token, activeTab]);
+  }, [token, activeTab, userPage, feedbackPage]);
 
-  const fetchFeedbackStats = async () => {
+  const fetchFeedbackStats = async (page = 1) => {
     try {
-      const res = await fetch('/api/admin/feedback-stats', {
+      const res = await fetch(`/api/admin/feedback-stats?page=${page}&limit=5`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -92,13 +95,15 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (page = 1) => {
     try {
-      const res = await fetch('/api/admin/users', {
+      const res = await fetch(`/api/admin/users?page=${page}&limit=10`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
-        setUsers(await res.json());
+        const data = await res.json();
+        setUsers(data.users);
+        setUserPagination(data.pagination);
       }
     } catch (err) {
       console.error('Fetch users error:', err);
@@ -441,20 +446,20 @@ export default function AdminDashboard() {
                     <div className="divide-y divide-slate-100">
                        {users.map((user) => (
                          <div key={user.id} className="flex items-center px-6 py-4 hover:bg-slate-50 transition-colors">
-                            <Avatar className="w-10 h-10 rounded-xl mr-4">
+                            <Avatar className="w-10 h-10 rounded-xl mr-4 border border-slate-200">
                                <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`} />
-                               <AvatarFallback>{user.name[0]}</AvatarFallback>
+                               <AvatarFallback className="bg-slate-100 text-slate-500 font-bold">{user.name[0]}</AvatarFallback>
                             </Avatar>
                             <div className="flex-1">
                                <p className="font-bold text-slate-900 text-sm">{user.name}</p>
                                <p className="text-xs text-slate-500">{user.email}</p>
                             </div>
                             <div className="flex items-center gap-3">
-                               <Badge variant="outline" className="uppercase text-[9px] font-bold tracking-widest">{user.role}</Badge>
+                               <Badge variant="outline" className="uppercase text-[9px] font-bold tracking-widest bg-slate-50 text-slate-500 border-slate-200">{user.role}</Badge>
                                <Button 
                                  variant="outline" 
                                  size="sm" 
-                                 className="h-8 text-[10px] font-bold rounded-lg gap-2 border-slate-200 hover:bg-primary/5 hover:text-primary hover:border-primary/20"
+                                 className="h-8 text-[10px] font-bold rounded-lg gap-2 border-slate-200 hover:bg-primary/5 hover:text-primary hover:border-primary/20 transition-all"
                                  onClick={() => generateSecureLink(user.id)}
                                >
                                  Generate Secure Link
@@ -463,6 +468,33 @@ export default function AdminDashboard() {
                          </div>
                        ))}
                     </div>
+                    {userPagination && userPagination.totalPages > 1 && (
+                      <div className="px-6 py-4 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between">
+                         <p className="text-xs text-slate-500">
+                           Showing page <span className="font-bold text-slate-900">{userPage}</span> of <span className="font-bold text-slate-900">{userPagination.totalPages}</span>
+                         </p>
+                         <div className="flex gap-2">
+                           <Button 
+                             variant="outline" 
+                             size="sm" 
+                             disabled={userPage === 1}
+                             onClick={() => setUserPage(prev => prev - 1)}
+                             className="h-8 rounded-lg text-xs"
+                           >
+                             Previous
+                           </Button>
+                           <Button 
+                             variant="outline" 
+                             size="sm" 
+                             disabled={userPage === userPagination.totalPages}
+                             onClick={() => setUserPage(prev => prev + 1)}
+                             className="h-8 rounded-lg text-xs"
+                           >
+                             Next
+                           </Button>
+                         </div>
+                      </div>
+                    )}
                   </div>
                 </>
               ) : activeTab === 'feedback' ? (
@@ -478,7 +510,7 @@ export default function AdminDashboard() {
                          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
                             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Satisfactory Score</p>
                             <div className="flex items-center gap-3">
-                               <p className="text-3xl font-black text-slate-900">{(feedbackData.stats.averageRating || 0).toFixed(1)}</p>
+                               <p className="text-3xl font-black text-slate-900">{Number(feedbackData.stats.averageRating || 0).toFixed(1)}</p>
                                <div className="flex gap-0.5 text-yellow-400">
                                   {[1, 2, 3, 4, 5].map(s => (
                                     <Star key={s} size={14} fill={feedbackData.stats.averageRating >= s ? 'currentColor' : 'none'} />
@@ -504,15 +536,19 @@ export default function AdminDashboard() {
                         </div>
                         <div className="divide-y divide-slate-100">
                            {feedbackData.latestFeedback.map((fb: any) => (
-                             <div key={fb.id} className="p-6 hover:bg-slate-50 transition-colors">
+                             <div 
+                               key={fb.id} 
+                               className="p-6 hover:bg-slate-50 transition-colors cursor-pointer group/item"
+                               onClick={() => navigate(`/admin/ticket/${fb.id}`)}
+                             >
                                 <div className="flex items-start justify-between mb-3">
                                    <div className="flex items-center gap-3">
-                                      <Avatar className="w-8 h-8 rounded-lg shrink-0">
-                                         <AvatarFallback className="bg-slate-200 text-[10px] font-bold">{fb.userName[0]}</AvatarFallback>
+                                      <Avatar className="w-8 h-8 rounded-lg shrink-0 border border-slate-200">
+                                         <AvatarFallback className="bg-slate-100 text-slate-500 text-[10px] font-bold">{fb.userName[0]}</AvatarFallback>
                                       </Avatar>
                                       <div>
-                                         <p className="text-sm font-bold text-slate-900">{fb.userName}</p>
-                                         <p className="text-[10px] text-slate-500 font-medium">Re: {fb.subject}</p>
+                                         <p className="text-sm font-bold text-slate-900 group-hover/item:text-primary transition-colors">{fb.userName}</p>
+                                         <p className="text-[10px] text-slate-500 font-medium truncate max-w-[200px]">Re: {fb.subject}</p>
                                       </div>
                                    </div>
                                    <div className="flex gap-0.5 text-yellow-400">
@@ -521,11 +557,11 @@ export default function AdminDashboard() {
                                       ))}
                                    </div>
                                 </div>
-                                <div className="bg-slate-100/50 p-4 rounded-2xl relative">
-                                   <div className="absolute top-2 left-2 opacity-5">
-                                      <MessageSquareQuote size={40} />
+                                <div className="bg-slate-100/50 p-4 rounded-2xl relative border border-slate-100/50">
+                                   <div className="absolute -top-1 -left-1 text-primary/10">
+                                      <MessageSquareQuote size={48} className="rotate-12" />
                                    </div>
-                                   <p className="text-xs text-slate-600 leading-relaxed font-medium relative z-10 italic">
+                                   <p className="text-xs text-slate-600 leading-relaxed font-medium relative z-10 italic pl-2">
                                       "{fb.feedback || 'The customer didn\'t leave a comment.'}"
                                    </p>
                                 </div>
@@ -538,6 +574,33 @@ export default function AdminDashboard() {
                              </div>
                            )}
                         </div>
+                        {feedbackData.pagination && feedbackData.pagination.totalPages > 1 && (
+                          <div className="px-6 py-4 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between">
+                            <p className="text-xs text-slate-500">
+                              Showing page <span className="font-bold text-slate-900">{feedbackPage}</span> of <span className="font-bold text-slate-900">{feedbackData.pagination.totalPages}</span>
+                            </p>
+                            <div className="flex gap-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                disabled={feedbackPage === 1}
+                                onClick={() => setFeedbackPage(prev => prev - 1)}
+                                className="h-8 rounded-lg text-xs"
+                              >
+                                Previous
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                disabled={feedbackPage === feedbackData.pagination.totalPages}
+                                onClick={() => setFeedbackPage(prev => prev + 1)}
+                                className="h-8 rounded-lg text-xs"
+                              >
+                                Next
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

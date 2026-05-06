@@ -112,14 +112,18 @@ async function initializeDatabase(db: mysql.Pool) {
       await db.query('ALTER TABLE tickets ADD COLUMN rating INT');
       console.log('Added rating column to tickets table.');
     } catch (err: any) {
-      if (err.code !== 'ER_DUP_COLUMN_NAME') console.error('Migration error (rating):', err);
+      if (err.code !== 'ER_DUP_FIELDNAME' && err.errno !== 1060) {
+        console.error('Migration error (rating):', err);
+      }
     }
     
     try {
       await db.query('ALTER TABLE tickets ADD COLUMN feedback TEXT');
       console.log('Added feedback column to tickets table.');
     } catch (err: any) {
-      if (err.code !== 'ER_DUP_COLUMN_NAME') console.error('Migration error (feedback):', err);
+      if (err.code !== 'ER_DUP_FIELDNAME' && err.errno !== 1060) {
+        console.error('Migration error (feedback):', err);
+      }
     }
 
     // Create Messages Table
@@ -363,17 +367,31 @@ app.post('/api/auth/login-secure', async (req, res) => {
 app.get('/api/admin/users', authenticateJWT, async (req: any, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
   
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const offset = (page - 1) * limit;
+
   const db = await getDb();
   if (db) {
     try {
-      const [rows] = await db.query('SELECT id, email, name, role FROM users');
-      return res.json(rows);
+      const [countResult]: any = await db.query('SELECT COUNT(*) as total FROM users');
+      const [rows] = await db.query('SELECT id, email, name, role FROM users LIMIT ? OFFSET ?', [limit, offset]);
+      
+      return res.json({
+        users: rows,
+        pagination: {
+          total: countResult[0].total,
+          page,
+          limit,
+          totalPages: Math.ceil(countResult[0].total / limit)
+        }
+      });
     } catch (err) {
       console.error('Database list users error:', err);
       return res.status(500).json({ message: 'Internal server error' });
     }
   }
-  res.json([]);
+  res.json({ users: [], pagination: { total: 0, page: 1, limit: 10, totalPages: 0 } });
 });
 
 // Create Ticket API
@@ -591,7 +609,7 @@ app.patch('/api/tickets/:id/reopen', authenticateJWT, async (req: any, res) => {
         return res.status(403).json({ message: 'Access denied' });
       }
 
-      if (ticket.status !== 'resolved' || ticket.rating !== null) {
+      if (req.user.role !== 'admin' && (ticket.status !== 'resolved' || ticket.rating !== null)) {
         return res.status(400).json({ message: 'Cannot reopen ticket after feedback or if not resolved' });
       }
 
@@ -648,10 +666,14 @@ app.delete('/api/tickets/:id', authenticateJWT, async (req: any, res) => {
 app.get('/api/admin/feedback-stats', authenticateJWT, async (req: any, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
   
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 5;
+  const offset = (page - 1) * limit;
+
   const db = await getDb();
   if (db) {
     try {
-      const [rows]: any = await db.query(`
+      const [statsRows]: any = await db.query(`
         SELECT 
           AVG(rating) as averageRating,
           COUNT(rating) as totalRatings,
@@ -659,25 +681,33 @@ app.get('/api/admin/feedback-stats', authenticateJWT, async (req: any, res) => {
         FROM tickets
       `);
       
+      const [totalFeedbackCount]: any = await db.query('SELECT COUNT(*) as total FROM tickets WHERE rating IS NOT NULL');
+      
       const [latestFeedback]: any = await db.query(`
         SELECT t.id, t.rating, t.feedback, u.name as userName, t.subject
         FROM tickets t
         JOIN users u ON t.userId = u.id
         WHERE t.rating IS NOT NULL
         ORDER BY t.createdAt DESC
-        LIMIT 5
-      `);
+        LIMIT ? OFFSET ?
+      `, [limit, offset]);
       
       return res.json({
-        stats: rows[0],
-        latestFeedback
+        stats: statsRows[0],
+        latestFeedback,
+        pagination: {
+          total: totalFeedbackCount[0].total,
+          page,
+          limit,
+          totalPages: Math.ceil(totalFeedbackCount[0].total / limit)
+        }
       });
     } catch (err) {
       console.error('Database feedback stats error:', err);
       return res.status(500).json({ message: 'Internal server error' });
     }
   }
-  res.json({ stats: { averageRating: 4.5, totalRatings: 10, totalTickets: 20 }, latestFeedback: [] });
+  res.json({ stats: { averageRating: 0, totalRatings: 0, totalTickets: 0 }, latestFeedback: [], pagination: { total: 0, page: 1, limit: 5, totalPages: 0 } });
 });
 
 // Health check

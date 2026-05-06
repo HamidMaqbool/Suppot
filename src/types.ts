@@ -14,7 +14,7 @@ export interface Message {
   id: string;
   ticketId: string;
   senderId: string;
-  content: string;
+  content?: string;
   createdAt: string;
   attachments?: string[];
   replyToId?: string;

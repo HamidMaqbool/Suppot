@@ -641,6 +641,15 @@ export default function TicketDetailView({ portal }: Props) {
                     Create New Ticket
                   </Button>
                 )}
+                {portal === 'admin' && (
+                  <Button 
+                    variant="outline"
+                    onClick={handleReopenTicket}
+                    className="border-slate-200 text-slate-600 rounded-xl font-bold text-xs uppercase tracking-widest px-6"
+                  >
+                    Re-open Ticket
+                  </Button>
+                )}
               </motion.div>
             )}
 
@@ -697,7 +706,7 @@ export default function TicketDetailView({ portal }: Props) {
           </div>
         </div>
 
-        {!(portal === 'user' && ticket?.status === 'resolved') && (
+        {!(ticket?.rating) && !(portal === 'user' && ticket?.status === 'resolved') && (
           <div className="p-6 bg-white border-t border-slate-200 z-10 shrink-0">
             <div className="max-w-4xl mx-auto space-y-4">
                {replyingTo && (
@@ -929,9 +938,15 @@ export default function TicketDetailView({ portal }: Props) {
                            <Button variant="outline" size="sm" className="w-full text-[10px] font-bold tracking-tight rounded-lg h-9 border-slate-200" onClick={() => toast.info('Transfer protocols initiated')}>
                               Transfer
                            </Button>
-                           <Button size="sm" className="w-full col-span-2 text-[10px] font-bold tracking-tight rounded-lg h-10 bg-green-600 hover:bg-green-700 shadow-sm" onClick={handleResolveTicket}>
-                              Resolve Case
-                           </Button>
+                           {ticket.status === 'resolved' ? (
+                             <Button size="sm" className="w-full col-span-2 text-[10px] font-bold tracking-tight rounded-lg h-10 bg-orange-600 hover:bg-orange-700 shadow-sm" onClick={handleReopenTicket}>
+                                Re-open Ticket
+                             </Button>
+                           ) : (
+                             <Button size="sm" className="w-full col-span-2 text-[10px] font-bold tracking-tight rounded-lg h-10 bg-green-600 hover:bg-green-700 shadow-sm" onClick={handleResolveTicket}>
+                                Resolve Case
+                             </Button>
+                           )}
                         </div>
                      </section>
                    )}
@@ -954,7 +969,7 @@ export default function TicketDetailView({ portal }: Props) {
                        </div>
                        <div className="min-w-0 flex-1">
                           <p className="text-[10px] font-bold text-slate-900 group-hover:text-primary truncate">{file.fileName}</p>
-                          <p className="text-[9px] text-slate-400">{(file.fileSize / 1024).toFixed(1)} KB • {file.fileType?.split('/')?.[1]?.toUpperCase() || 'FILE'}</p>
+                          <p className="text-[9px] text-slate-400">{Number(file.fileSize / 1024 || 0).toFixed(1)} KB • {file.fileType?.split('/')?.[1]?.toUpperCase() || 'FILE'}</p>
                        </div>
                     </a>
                   )) : (
