@@ -54,7 +54,13 @@ export default function AdminDashboard() {
   useEffect(() => {
     const socket = getSocket();
     socket.on('new-ticket', (ticket: any) => {
-      toast.info(`New ticket created: ${ticket.subject}`);
+      toast.info(`New ticket created: ${ticket.subject}`, {
+        duration: Infinity,
+        action: {
+          label: 'View',
+          onClick: () => navigate(`/admin/ticket/${ticket.id}`)
+        }
+      });
       playSound();
       fetchTickets();
     });

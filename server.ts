@@ -128,7 +128,7 @@ async function initializeDatabase(db: mysql.Pool) {
         id VARCHAR(36) PRIMARY KEY,
         ticketId VARCHAR(36) NOT NULL,
         senderId VARCHAR(36) NOT NULL,
-        content TEXT NOT NULL,
+        content TEXT,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);

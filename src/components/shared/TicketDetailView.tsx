@@ -67,7 +67,10 @@ export default function TicketDetailView({ portal }: Props) {
   const [rating, setRating] = useState<number>(0);
   const [feedback, setFeedback] = useState('');
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'details' | 'attachments'>('details');
   const [isFocused, setIsFocused] = useState(true);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [showAttachmentsSidebar, setShowAttachmentsSidebar] = useState(true);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -161,7 +164,7 @@ export default function TicketDetailView({ portal }: Props) {
       if (msg.ticketId === id) {
         setMessages(prev => {
           if (prev.find(m => m.id === msg.id)) return prev;
-          if (!document.hasFocus()) playSound();
+          if (msg.senderId !== user?.id) playSound();
           return [...prev, msg];
         });
       }
@@ -181,9 +184,13 @@ export default function TicketDetailView({ portal }: Props) {
 
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      const scrollOptions: ScrollToOptions = {
+        top: scrollRef.current.scrollHeight,
+        behavior: messages.length <= 5 ? 'auto' : 'smooth'
+      };
+      scrollRef.current.scrollTo(scrollOptions);
     }
-  }, [messages]);
+  }, [messages, isLoading]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() && attachments.length === 0) return;
@@ -191,10 +198,14 @@ export default function TicketDetailView({ portal }: Props) {
 
     let uploadedUrls: string[] = [];
     try {
-      for (const file of attachments) {
+      const totalFiles = attachments.length;
+      for (let i = 0; i < totalFiles; i++) {
+        const file = attachments[i];
         const formData = new FormData();
         formData.append('file', file);
         formData.append('ticketId', id!);
+        
+        setUploadProgress(Math.round(((i) / totalFiles) * 100));
         
         const res = await fetch('/api/upload', {
           method: 'POST',
@@ -206,6 +217,7 @@ export default function TicketDetailView({ portal }: Props) {
           uploadedUrls.push(data.url);
           setTicketAttachments(prev => [...prev, data]);
         }
+        setUploadProgress(Math.round(((i + 1) / totalFiles) * 100));
       }
 
       const msg: Message = {
@@ -223,6 +235,7 @@ export default function TicketDetailView({ portal }: Props) {
       setNewMessage('');
       setReplyingTo(null);
       setAttachments([]);
+      setUploadProgress(0);
       socket.emit('typing', { ticketId: id, userId: user?.id, isTyping: false });
     } catch (err) {
       console.error('Send message error:', err);
@@ -388,7 +401,7 @@ export default function TicketDetailView({ portal }: Props) {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-6 py-8" ref={scrollRef}>
+        <div className="flex-1 overflow-y-auto px-6 py-8 scroll-smooth" ref={scrollRef}>
           <div className="max-w-4xl mx-auto space-y-8 pb-10">
             <div className="flex gap-4">
                <Avatar className="w-10 h-10 border-2 border-white shadow-sm ring-1 ring-slate-200">
@@ -510,20 +523,16 @@ export default function TicketDetailView({ portal }: Props) {
                 <h3 className="text-xl font-black text-slate-900 mb-2 tracking-tight">Rate your experience</h3>
                 <p className="text-slate-500 text-sm mb-8 font-medium">How helpful was our response today?</p>
                 
-                <div className="flex justify-center gap-6 mb-8 py-4">
-                  <div className="flex flex-col items-center gap-4">
-                    <div className="flex justify-center gap-3">
-                      {[1, 2, 3, 4, 5].map(star => (
-                        <button 
-                          key={star}
-                          onClick={() => setRating(star)}
-                          className={`w-12 h-12 rounded-2xl transition-all duration-300 transform hover:scale-110 ${rating >= star ? 'bg-yellow-400 text-white shadow-lg shadow-yellow-200' : 'bg-slate-50 text-slate-300 hover:bg-slate-100'}`}
-                        >
-                          <Star size={24} fill={rating >= star ? 'currentColor' : 'none'} className={rating >= star ? 'animate-in zoom-in-50 duration-300' : ''} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                <div className="flex justify-center gap-2 mb-8 py-4">
+                  {[1, 2, 3, 4, 5].map(star => (
+                    <button 
+                      key={star}
+                      onClick={() => setRating(star)}
+                      className={`w-12 h-12 rounded-2xl transition-all duration-300 transform hover:scale-110 flex items-center justify-center ${rating >= star ? 'bg-yellow-400 text-white shadow-lg shadow-yellow-200' : 'bg-slate-50 text-slate-300 hover:bg-slate-100'}`}
+                    >
+                      <Star size={24} fill={rating >= star ? 'currentColor' : 'none'} className={rating >= star ? 'animate-in zoom-in-50 duration-300' : ''} />
+                    </button>
+                  ))}
                 </div>
 
                 <textarea 
@@ -555,245 +564,275 @@ export default function TicketDetailView({ portal }: Props) {
           </div>
         </div>
 
-        <div className="p-6 bg-white border-t border-slate-200 z-10 shrink-0">
-          <div className="max-w-4xl mx-auto space-y-4">
-             {replyingTo && (
-               <motion.div 
-                 initial={{ opacity: 0, y: 10 }}
-                 animate={{ opacity: 1, y: 0 }}
-                 className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between"
-               >
-                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-1 h-8 bg-primary rounded-full" />
-                    <div className="min-w-0">
-                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Replying to {MOCK_USERS.find(u => u.id === replyingTo.senderId)?.name}</p>
-                       <p className="text-xs text-slate-600 truncate">{replyingTo.content}</p>
-                    </div>
-                 </div>
-                 <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full" onClick={() => setReplyingTo(null)}>
-                    <X size={14} />
-                 </Button>
-               </motion.div>
-             )}
-
-             {attachments.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                   {attachments.map((file, idx) => (
-                     <div key={idx} className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 border border-blue-100">
-                        <FileText size={12} />
-                        <span className="max-w-[120px] truncate">{file.name}</span>
-                        <button onClick={() => removeAttachment(idx)}><X size={12} /></button>
-                     </div>
-                   ))}
-                </div>
-             )}
-
-             <div className="relative bg-white border-2 border-slate-100 rounded-2xl p-2 focus-within:border-primary/40 transition-all shadow-sm">
-                {showCanned && (
-                  <div className="absolute bottom-full left-0 mb-4 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 overflow-hidden">
-                    <div className="p-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-                       <span className="text-[10px] font-bold text-slate-400 uppercase">Canned Responses</span>
-                       <button onClick={() => setShowCanned(false)}><X size={12} /></button>
-                    </div>
-                    <ScrollArea className="h-60">
-                      <div className="p-2 space-y-1">
-                        {cannedResponses.map(resp => (
-                          <button 
-                            key={resp.id}
-                            onClick={() => {
-                              setNewMessage(resp.content);
-                              setShowCanned(false);
-                            }}
-                            className="w-full text-left p-3 hover:bg-slate-50 rounded-xl transition-colors group"
-                          >
-                            <p className="text-xs font-bold text-slate-900 group-hover:text-primary transition-colors">{resp.title}</p>
-                            <p className="text-[10px] text-slate-500 line-clamp-1">{resp.content}</p>
-                          </button>
-                        ))}
+        {!(portal === 'user' && ticket?.status === 'resolved') && (
+          <div className="p-6 bg-white border-t border-slate-200 z-10 shrink-0">
+            <div className="max-w-4xl mx-auto space-y-4">
+               {replyingTo && (
+                 <motion.div 
+                   initial={{ opacity: 0, y: 10 }}
+                   animate={{ opacity: 1, y: 0 }}
+                   className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between"
+                 >
+                   <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-1 h-8 bg-primary rounded-full" />
+                      <div className="min-w-0">
+                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Replying to {MOCK_USERS.find(u => u.id === replyingTo.senderId)?.name}</p>
+                         <p className="text-xs text-slate-600 truncate">{replyingTo.content}</p>
                       </div>
-                    </ScrollArea>
+                   </div>
+                   <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full" onClick={() => setReplyingTo(null)}>
+                      <X size={14} />
+                   </Button>
+                 </motion.div>
+               )}
+  
+               {attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                     {attachments.map((file, idx) => (
+                       <div key={idx} className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 border border-blue-100">
+                          <FileText size={12} />
+                          <span className="max-w-[120px] truncate">{file.name}</span>
+                          <button onClick={() => removeAttachment(idx)}><X size={12} /></button>
+                       </div>
+                     ))}
                   </div>
-                )}
-                <Textarea 
-                  placeholder={ticket.rating ? "Ticket is finalized. Feedback submitted." : `Reply as ${portal === 'user' ? 'Customer' : 'Support Specialist'}...`}
-                  readOnly={!!ticket.rating}
-                  className="bg-transparent border-none focus-visible:ring-0 min-h-[120px] resize-none pb-12"
-                  value={newMessage}
-                  onChange={(e) => onTyping(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage();
-                    }
-                  }}
-                />
-                <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between border-t border-slate-100/50 pt-3">
-                   <div className="flex items-center gap-1">
-                      <input type="file" ref={fileInputRef} className="hidden" multiple onChange={onFileChange} />
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        disabled={!!ticket.rating}
-                        className="w-9 h-9 text-slate-400 hover:text-primary rounded-xl"
-                        onClick={() => fileInputRef.current?.click()}
-                      >
-                        <Paperclip size={20} />
-                      </Button>
-                      {portal === 'admin' && (
+               )}
+
+               {uploading && (
+                 <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mb-2">
+                   <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${uploadProgress}%` }}
+                    className="h-full bg-primary"
+                   />
+                 </div>
+               )}
+  
+               <div className="relative bg-white border-2 border-slate-100 rounded-2xl p-2 focus-within:border-primary/40 transition-all shadow-sm">
+                  {showCanned && (
+                    <div className="absolute bottom-full left-0 mb-4 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 overflow-hidden">
+                      <div className="p-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                         <span className="text-[10px] font-bold text-slate-400 uppercase">Canned Responses</span>
+                         <button onClick={() => setShowCanned(false)}><X size={12} /></button>
+                      </div>
+                      <ScrollArea className="h-60">
+                        <div className="p-2 space-y-1">
+                          {cannedResponses.map(resp => (
+                            <button 
+                              key={resp.id}
+                              onClick={() => {
+                                setNewMessage(resp.content);
+                                setShowCanned(false);
+                              }}
+                              className="w-full text-left p-3 hover:bg-slate-50 rounded-xl transition-colors group"
+                            >
+                              <p className="text-xs font-bold text-slate-900 group-hover:text-primary transition-colors">{resp.title}</p>
+                              <p className="text-[10px] text-slate-500 line-clamp-1">{resp.content}</p>
+                            </button>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                  )}
+                  <Textarea 
+                    placeholder={ticket.rating ? "Ticket is finalized. Feedback submitted." : `Reply as ${portal === 'user' ? 'Customer' : 'Support Specialist'}...`}
+                    readOnly={!!ticket.rating}
+                    className="bg-transparent border-none focus-visible:ring-0 min-h-[120px] resize-none pb-12"
+                    value={newMessage}
+                    onChange={(e) => onTyping(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage();
+                      }
+                    }}
+                  />
+                  <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between border-t border-slate-100/50 pt-3">
+                     <div className="flex items-center gap-1">
+                        <input type="file" ref={fileInputRef} className="hidden" multiple onChange={onFileChange} />
                         <Button 
                           variant="ghost" 
                           size="icon" 
                           disabled={!!ticket.rating}
-                          className={`w-9 h-9 rounded-xl transition-colors ${showCanned ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:text-primary'}`}
-                          onClick={() => setShowCanned(!showCanned)}
+                          className="w-9 h-9 text-slate-400 hover:text-primary rounded-xl"
+                          onClick={() => fileInputRef.current?.click()}
                         >
-                          <MessageSquareQuote size={20} />
+                          <Paperclip size={20} />
                         </Button>
-                      )}
-                      <div className="relative">
-                         <Button 
-                           variant="ghost" 
-                           size="icon" 
-                           disabled={!!ticket.rating}
-                           className={`w-9 h-9 rounded-xl transition-colors ${showTags ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:text-primary'}`}
-                           onClick={() => setShowTags(!showTags)}
-                         >
-                           <Tag size={20} />
-                         </Button>
-                         
-                         {showTags && (
-                           <div className="absolute bottom-full left-0 mb-4 w-40 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden">
-                              <div className="p-2 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Add Tag</div>
-                              <div className="p-1">
-                                 {['Bug', 'Billing', 'Security', 'Feature', 'Support'].map(tag => (
-                                   <button 
-                                     key={tag}
-                                     onClick={() => handleAddTag(tag)}
-                                     className="w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-slate-50 rounded-lg flex items-center justify-between"
-                                   >
-                                      {tag}
-                                      {ticketTags.some(t => t.name === tag) && <CheckCircle2 size={12} className="text-primary" />}
-                                   </button>
-                                 ))}
-                              </div>
-                           </div>
-                         )}
-                      </div>
-                   </div>
-                   <div className="flex items-center gap-3">
-                      <Button 
-                        size="sm" 
-                        onClick={handleSendMessage}
-                        disabled={!newMessage.trim() && attachments.length === 0}
-                        className="bg-primary hover:bg-primary/90 text-white px-6 rounded-xl gap-2 font-bold shadow-lg shadow-primary/20"
-                      >
-                         Send <Send size={16} />
-                      </Button>
-                   </div>
-                </div>
-             </div>
+                        {portal === 'admin' && (
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            disabled={!!ticket.rating}
+                            className={`w-9 h-9 rounded-xl transition-colors ${showCanned ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:text-primary'}`}
+                            onClick={() => setShowCanned(!showCanned)}
+                          >
+                            <MessageSquareQuote size={20} />
+                          </Button>
+                        )}
+                        <div className="relative">
+                           <Button 
+                             variant="ghost" 
+                             size="icon" 
+                             disabled={!!ticket.rating}
+                             className={`w-9 h-9 rounded-xl transition-colors ${showTags ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:text-primary'}`}
+                             onClick={() => setShowTags(!showTags)}
+                           >
+                             <Tag size={20} />
+                           </Button>
+                           
+                           {showTags && (
+                             <div className="absolute bottom-full left-0 mb-4 w-40 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden">
+                                <div className="p-2 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Add Tag</div>
+                                <div className="p-1">
+                                   {['Bug', 'Billing', 'Security', 'Feature', 'Support'].map(tag => (
+                                     <button 
+                                       key={tag}
+                                       onClick={() => handleAddTag(tag)}
+                                       className="w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-slate-50 rounded-lg flex items-center justify-between"
+                                     >
+                                        {tag}
+                                        {ticketTags.some(t => t.name === tag) && <CheckCircle2 size={12} className="text-primary" />}
+                                     </button>
+                                   ))}
+                                </div>
+                             </div>
+                           )}
+                        </div>
+                     </div>
+                     <div className="flex items-center gap-3">
+                        <Button 
+                          size="sm" 
+                          onClick={handleSendMessage}
+                          disabled={(!newMessage.trim() && attachments.length === 0) || uploading}
+                          className="bg-primary hover:bg-primary/90 text-white px-6 rounded-xl gap-2 font-bold shadow-lg shadow-primary/20"
+                        >
+                           {uploading ? 'Uploading...' : 'Send'} <Send size={16} />
+                        </Button>
+                     </div>
+                  </div>
+               </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <div className="hidden lg:flex w-80 flex-col border-l border-slate-200 h-full bg-white shrink-0">
+        <div className="h-12 border-b border-slate-100 flex items-center px-4 gap-4 shrink-0">
+          <button 
+            onClick={() => setActiveSidebarTab('details')}
+            className={`text-[10px] font-bold uppercase tracking-widest h-full border-b-2 transition-all px-2 ${activeSidebarTab === 'details' ? 'border-primary text-primary' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+          >
+            Details
+          </button>
+          <button 
+            onClick={() => setActiveSidebarTab('attachments')}
+            className={`text-[10px] font-bold uppercase tracking-widest h-full border-b-2 transition-all px-2 ${activeSidebarTab === 'attachments' ? 'border-primary text-primary' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+          >
+            Attachments ({ticketAttachments.length})
+          </button>
+        </div>
         <ScrollArea className="flex-1">
           <div className="p-8">
-            <div className="mb-10 text-center">
-               <Avatar className="w-20 h-20 mx-auto mb-4 border-4 border-slate-50 shadow-md">
-                 <AvatarImage src={requestor?.avatar} />
-                 <AvatarFallback>U</AvatarFallback>
-               </Avatar>
-               <h3 className="font-bold text-slate-900">{requestor?.name}</h3>
-               <p className="text-xs text-slate-500">{requestor?.email}</p>
-               <Badge className="mt-3 bg-slate-100 text-slate-600 border-slate-200/50 hover:bg-slate-100 uppercase text-[9px] font-bold tracking-widest px-3">Standard Account</Badge>
-            </div>
-
-            <div className="space-y-8">
-               <section>
-                 <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-4">Request Detail</h4>
-                 <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                       <span className="text-xs text-slate-500 flex items-center gap-2"><Hash size={12} /> Ticket ID</span>
-                       <span className="text-xs font-mono font-bold text-slate-700">{ticket.id}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                       <span className="text-xs text-slate-500 flex items-center gap-2"><CheckCircle2 size={12} /> Status</span>
-                       <Badge variant="outline" className={`text-[10px] font-bold uppercase transition-colors ${
-                         ticket.status === 'open' ? 'bg-blue-50 text-blue-600 border-blue-100' : 
-                         ticket.status === 'resolved' ? 'bg-green-50 text-green-600 border-green-100' : 'bg-slate-50 text-slate-500'
-                       }`}>
-                         {ticket.status}
-                       </Badge>
-                    </div>
-                    <div className="flex items-center justify-between">
-                       <span className="text-xs text-slate-500 flex items-center gap-2"><AlertCircle size={12} /> Priority</span>
-                       <span className={`text-xs font-bold uppercase ${
-                         ticket.priority === 'urgent' ? 'text-red-500' : 
-                         ticket.priority === 'high' ? 'text-orange-500' : 'text-slate-500'
-                       }`}>{ticket.priority}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                       <span className="text-xs text-slate-500 flex items-center gap-2"><Tag size={12} /> Category</span>
-                       <span className="text-xs font-bold text-slate-700">{ticket.category}</span>
-                    </div>
-                    {ticketTags.length > 0 && (
-                      <div className="pt-2 flex flex-wrap gap-1.5">
-                        {ticketTags.map(tag => (
-                          <Badge key={tag.id} className="bg-slate-100 text-slate-600 border-none text-[10px] uppercase font-bold py-0.5 px-2">
-                             {tag.name}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                 </div>
-               </section>
-
-               {portal === 'admin' && (
-                 <section className="pt-6 border-t border-slate-100">
-                    <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-4">Internal Controls</h4>
-                    <div className="grid grid-cols-2 gap-2">
-                       <Button variant="outline" size="sm" className="w-full text-[10px] font-bold tracking-tight rounded-lg h-9 border-slate-200" onClick={() => toast.info('Re-assignment queue opened')}>
-                          Re-Assign
-                       </Button>
-                       <Button variant="outline" size="sm" className="w-full text-[10px] font-bold tracking-tight rounded-lg h-9 border-slate-200" onClick={() => toast.info('Transfer protocols initiated')}>
-                          Transfer
-                       </Button>
-                       <Button size="sm" className="w-full col-span-2 text-[10px] font-bold tracking-tight rounded-lg h-10 bg-green-600 hover:bg-green-700 shadow-sm" onClick={handleResolveTicket}>
-                          Resolve Case
-                       </Button>
-                    </div>
-                 </section>
-               )}
-
-               <section className="pt-6 border-t border-slate-100">
-                 <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-4">Related Assets</h4>
-                 <div className="space-y-3">
-                   {ticketAttachments.length > 0 ? ticketAttachments.map(file => (
-                     <a 
-                       key={file.id} 
-                       href={file.fileUrl} 
-                       target="_blank" 
-                       rel="noopener noreferrer"
-                       className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center gap-3 group cursor-pointer hover:bg-slate-100/50 transition-colors"
-                     >
-                        <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-slate-200 group-hover:border-primary transition-colors">
-                           <FileText size={16} className="text-slate-400 group-hover:text-primary" />
+            {activeSidebarTab === 'details' ? (
+              <>
+                <div className="mb-10 text-center">
+                   <Avatar className="w-20 h-20 mx-auto mb-4 border-4 border-slate-50 shadow-md">
+                     <AvatarImage src={requestor?.avatar} />
+                     <AvatarFallback>U</AvatarFallback>
+                   </Avatar>
+                   <h3 className="font-bold text-slate-900">{requestor?.name}</h3>
+                   <p className="text-xs text-slate-500">{requestor?.email}</p>
+                   <Badge className="mt-3 bg-slate-100 text-slate-600 border-slate-200/50 hover:bg-slate-100 uppercase text-[9px] font-bold tracking-widest px-3">Standard Account</Badge>
+                </div>
+    
+                <div className="space-y-8">
+                   <section>
+                     <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-4">Request Detail</h4>
+                     <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                           <span className="text-xs text-slate-500 flex items-center gap-2"><Hash size={12} /> Ticket ID</span>
+                           <span className="text-xs font-mono font-bold text-slate-700">{ticket.id}</span>
                         </div>
-                        <div className="min-w-0">
-                           <p className="text-[10px] font-bold text-slate-900 group-hover:text-primary truncate">{file.fileName}</p>
-                           <p className="text-[9px] text-slate-400">{(file.fileSize / 1024).toFixed(1)} KB • {file.fileType?.split('/')?.[1]?.toUpperCase() || 'FILE'}</p>
+                        <div className="flex items-center justify-between">
+                           <span className="text-xs text-slate-500 flex items-center gap-2"><CheckCircle2 size={12} /> Status</span>
+                           <Badge variant="outline" className={`text-[10px] font-bold uppercase transition-colors ${
+                             ticket.status === 'open' ? 'bg-blue-50 text-blue-600 border-blue-100' : 
+                             ticket.status === 'resolved' ? 'bg-green-50 text-green-600 border-green-100' : 'bg-slate-50 text-slate-500'
+                           }`}>
+                             {ticket.status}
+                           </Badge>
                         </div>
-                     </a>
-                   )) : (
-                     <div className="text-center py-6 text-slate-400 border border-dashed border-slate-200 rounded-xl">
-                        <Paperclip size={20} className="mx-auto mb-2 opacity-30" />
-                        <p className="text-[10px] font-bold uppercase tracking-wider">No assets attached</p>
+                        <div className="flex items-center justify-between">
+                           <span className="text-xs text-slate-500 flex items-center gap-2"><AlertCircle size={12} /> Priority</span>
+                           <span className={`text-xs font-bold uppercase ${
+                             ticket.priority === 'urgent' ? 'text-red-500' : 
+                             ticket.priority === 'high' ? 'text-orange-500' : 'text-slate-500'
+                           }`}>{ticket.priority}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                           <span className="text-xs text-slate-500 flex items-center gap-2"><Tag size={12} /> Category</span>
+                           <span className="text-xs font-bold text-slate-700">{ticket.category}</span>
+                        </div>
+                        {ticketTags.length > 0 && (
+                          <div className="pt-2 flex flex-wrap gap-1.5">
+                            {ticketTags.map(tag => (
+                              <Badge key={tag.id} className="bg-slate-100 text-slate-600 border-none text-[10px] uppercase font-bold py-0.5 px-2">
+                                 {tag.name}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                      </div>
+                   </section>
+    
+                   {portal === 'admin' && (
+                     <section className="pt-6 border-t border-slate-100">
+                        <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-4">Internal Controls</h4>
+                        <div className="grid grid-cols-2 gap-2">
+                           <Button variant="outline" size="sm" className="w-full text-[10px] font-bold tracking-tight rounded-lg h-9 border-slate-200" onClick={() => toast.info('Re-assignment queue opened')}>
+                              Re-Assign
+                           </Button>
+                           <Button variant="outline" size="sm" className="w-full text-[10px] font-bold tracking-tight rounded-lg h-9 border-slate-200" onClick={() => toast.info('Transfer protocols initiated')}>
+                              Transfer
+                           </Button>
+                           <Button size="sm" className="w-full col-span-2 text-[10px] font-bold tracking-tight rounded-lg h-10 bg-green-600 hover:bg-green-700 shadow-sm" onClick={handleResolveTicket}>
+                              Resolve Case
+                           </Button>
+                        </div>
+                     </section>
                    )}
-                 </div>
-               </section>
-            </div>
+                </div>
+              </>
+            ) : (
+              <section>
+                <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-4">Ticket Attachments</h4>
+                <div className="space-y-3">
+                  {ticketAttachments.length > 0 ? ticketAttachments.map(file => (
+                    <a 
+                      key={file.id} 
+                      href={file.fileUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center gap-3 group cursor-pointer hover:bg-slate-100/50 transition-colors"
+                    >
+                       <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-slate-200 group-hover:border-primary transition-colors">
+                          <FileText size={16} className="text-slate-400 group-hover:text-primary" />
+                       </div>
+                       <div className="min-w-0 flex-1">
+                          <p className="text-[10px] font-bold text-slate-900 group-hover:text-primary truncate">{file.fileName}</p>
+                          <p className="text-[9px] text-slate-400">{(file.fileSize / 1024).toFixed(1)} KB • {file.fileType?.split('/')?.[1]?.toUpperCase() || 'FILE'}</p>
+                       </div>
+                    </a>
+                  )) : (
+                    <div className="text-center py-12 text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                       <Paperclip size={24} className="mx-auto mb-3 opacity-20" />
+                       <p className="text-[10px] font-bold uppercase tracking-wider">No assets available</p>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
           </div>
         </ScrollArea>
       </div>
