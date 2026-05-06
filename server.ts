@@ -101,9 +101,26 @@ async function initializeDatabase(db: mysql.Pool) {
         priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium',
         category VARCHAR(50),
         assigned_to VARCHAR(36),
+        rating INT,
+        feedback TEXT,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // Migration: ensure columns exist if table was created earlier
+    try {
+      await db.query('ALTER TABLE tickets ADD COLUMN rating INT');
+      console.log('Added rating column to tickets table.');
+    } catch (err: any) {
+      if (err.code !== 'ER_DUP_COLUMN_NAME') console.error('Migration error (rating):', err);
+    }
+    
+    try {
+      await db.query('ALTER TABLE tickets ADD COLUMN feedback TEXT');
+      console.log('Added feedback column to tickets table.');
+    } catch (err: any) {
+      if (err.code !== 'ER_DUP_COLUMN_NAME') console.error('Migration error (feedback):', err);
+    }
 
     // Create Messages Table
     await db.query(`
@@ -181,8 +198,10 @@ async function initializeDatabase(db: mysql.Pool) {
 // --- Auth Middleware ---
 const authenticateJWT = (req: any, res: any, next: any) => {
   const authHeader = req.headers.authorization;
-  if (authHeader) {
-    const token = authHeader.split(' ')[1];
+  if (authHeader && typeof authHeader === 'string') {
+    const parts = authHeader.split(' ');
+    if (parts.length < 2) return res.sendStatus(401);
+    const token = parts[1];
     jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
       if (err) return res.sendStatus(403);
       req.user = user;
@@ -370,6 +389,7 @@ app.post('/api/tickets', authenticateJWT, async (req: any, res) => {
         'INSERT INTO tickets (id, userId, subject, description, category, priority) VALUES (?, ?, ?, ?, ?, ?)',
         [ticketId, userId, subject, description, category, priority || 'medium']
       );
+      io.emit('new-ticket', { id: ticketId, subject, userId });
       return res.json({ id: ticketId, userId, subject, description, category, priority: priority || 'medium', status: 'open' });
     } catch (err) {
       console.error('Database create ticket error:', err);
@@ -525,6 +545,136 @@ app.patch('/api/tickets/:id/status', authenticateJWT, async (req: any, res) => {
   }
   
   res.json({ message: 'Status updated (demo mode)' });
+});
+
+// Submit Feedback API
+app.post('/api/tickets/:id/feedback', authenticateJWT, async (req: any, res) => {
+  const { id } = req.params;
+  const { rating, feedback } = req.body;
+  const userId = req.user.id;
+
+  const db = await getDb();
+  if (db) {
+    try {
+      // Ensure the user owns the ticket
+      const [ticketRows]: any = await db.query('SELECT userId FROM tickets WHERE id = ?', [id]);
+      if (ticketRows.length === 0 || ticketRows[0].userId !== userId) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+
+      await db.query('UPDATE tickets SET rating = ?, feedback = ?, status = "resolved" WHERE id = ?', [rating, feedback, id]);
+      return res.json({ message: 'Feedback submitted successfully. Ticket remains resolved.' });
+    } catch (err) {
+      console.error('Database feedback error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  res.json({ message: 'Feedback submitted (demo mode)' });
+});
+
+// Reopen Ticket API
+app.patch('/api/tickets/:id/reopen', authenticateJWT, async (req: any, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
+  const db = await getDb();
+  if (db) {
+    try {
+      // Check if user owns the ticket and it is resolved but feedback is pending
+      const [ticketRows]: any = await db.query('SELECT userId, status, rating FROM tickets WHERE id = ?', [id]);
+      if (ticketRows.length === 0) return res.status(404).json({ message: 'Ticket not found' });
+      
+      const ticket = ticketRows[0];
+      if (ticket.userId !== userId && req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+
+      if (ticket.status !== 'resolved' || ticket.rating !== null) {
+        return res.status(400).json({ message: 'Cannot reopen ticket after feedback or if not resolved' });
+      }
+
+      await db.query('UPDATE tickets SET status = "open" WHERE id = ?', [id]);
+      return res.json({ message: 'Ticket reopened successfully' });
+    } catch (err) {
+      console.error('Database reopen error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  res.json({ message: 'Ticket reopened (demo mode)' });
+});
+
+// Delete Ticket API (with file cleanup)
+app.delete('/api/tickets/:id', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  const { id } = req.params;
+
+  const db = await getDb();
+  if (db) {
+    try {
+      // 1. Get all attachments for this ticket
+      const [attachments]: any = await db.query('SELECT filePath FROM attachments WHERE ticketId = ?', [id]);
+      
+      // 2. Delete physical files
+      for (const attachment of attachments) {
+        const fullPath = path.join(process.cwd(), attachment.filePath);
+        try {
+          if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
+          }
+        } catch (fileErr) {
+          console.error(`Error deleting file ${fullPath}:`, fileErr);
+        }
+      }
+
+      // 3. Delete from DB records
+      await db.query('DELETE FROM attachments WHERE ticketId = ?', [id]);
+      await db.query('DELETE FROM messages WHERE ticketId = ?', [id]);
+      await db.query('DELETE FROM ticket_tags WHERE ticket_id = ?', [id]);
+      await db.query('DELETE FROM tickets WHERE id = ?', [id]);
+
+      return res.json({ message: 'Ticket and all associated files deleted successfully' });
+    } catch (err) {
+      console.error('Database delete error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  res.json({ message: 'Ticket deleted (demo mode)' });
+});
+
+// Feedback Statistics API
+app.get('/api/admin/feedback-stats', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  
+  const db = await getDb();
+  if (db) {
+    try {
+      const [rows]: any = await db.query(`
+        SELECT 
+          AVG(rating) as averageRating,
+          COUNT(rating) as totalRatings,
+          COUNT(*) as totalTickets
+        FROM tickets
+      `);
+      
+      const [latestFeedback]: any = await db.query(`
+        SELECT t.id, t.rating, t.feedback, u.name as userName, t.subject
+        FROM tickets t
+        JOIN users u ON t.userId = u.id
+        WHERE t.rating IS NOT NULL
+        ORDER BY t.createdAt DESC
+        LIMIT 5
+      `);
+      
+      return res.json({
+        stats: rows[0],
+        latestFeedback
+      });
+    } catch (err) {
+      console.error('Database feedback stats error:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  res.json({ stats: { averageRating: 4.5, totalRatings: 10, totalTickets: 20 }, latestFeedback: [] });
 });
 
 // Health check

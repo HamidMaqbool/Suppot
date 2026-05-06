@@ -19,8 +19,12 @@ import {
   LifeBuoy,
   X,
   UserPlus,
-  Loader2
+  Loader2,
+  Star,
+  MessageSquareQuote,
+  Trash2
 } from 'lucide-react';
+import { getSocket } from '../../lib/socket';
 import { MOCK_USERS } from '../../constants';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -40,13 +44,47 @@ export default function AdminDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [users, setUsers] = useState<any[]>([]);
+  const [feedbackData, setFeedbackData] = useState<any>(null);
+
+  const playSound = () => {
+    const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
+    audio.play().catch(() => {});
+  };
+
+  useEffect(() => {
+    const socket = getSocket();
+    socket.on('new-ticket', (ticket: any) => {
+      toast.info(`New ticket created: ${ticket.subject}`);
+      playSound();
+      fetchTickets();
+    });
+    return () => {
+      socket.off('new-ticket');
+    };
+  }, []);
 
   useEffect(() => {
     fetchTickets();
     if (activeTab === 'customers') {
       fetchUsers();
     }
+    if (activeTab === 'feedback') {
+      fetchFeedbackStats();
+    }
   }, [token, activeTab]);
+
+  const fetchFeedbackStats = async () => {
+    try {
+      const res = await fetch('/api/admin/feedback-stats', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setFeedbackData(await res.json());
+      }
+    } catch (err) {
+      console.error('Fetch feedback stats error:', err);
+    }
+  };
 
   const fetchUsers = async () => {
     try {
@@ -113,14 +151,31 @@ export default function AdminDashboard() {
 
       if (res.ok) {
         toast.success(`Ticket assigned to ${agentName}`);
-        setTickets(tickets.map(t => t.id === ticketId ? { ...t, assignedTo: agentName } : t));
+        setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, assignedTo: agentName } : t));
         setAssigningId(null);
-      } else {
-        toast.error('Assignment failed');
       }
     } catch (err) {
       console.error('Assign error:', err);
       toast.error('Connection error');
+    }
+  };
+
+  const handleDeleteTicket = async (ticketId: string) => {
+    if (!window.confirm('Are you sure you want to delete this ticket and all its assets? This cannot be undone.')) return;
+    
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        toast.success('Ticket and assets deleted');
+        setTickets(prev => prev.filter(t => t.id !== ticketId));
+      } else {
+        toast.error('Failed to delete ticket');
+      }
+    } catch (err) {
+      console.error('Delete error:', err);
     }
   };
 
@@ -171,6 +226,7 @@ export default function AdminDashboard() {
             { id: 'inbox', label: 'Ticket Inbox', icon: Inbox },
             { id: 'analytics', label: 'Support Metrics', icon: BarChart3 },
             { id: 'customers', label: 'Customers', icon: Users },
+            { id: 'feedback', label: 'Feedback & Ratings', icon: Star },
             { id: 'settings', label: 'System Settings', icon: Settings },
           ].map((item) => (
             <button 
@@ -304,7 +360,7 @@ export default function AdminDashboard() {
                                      onClick={(e) => {
                                         e.stopPropagation();
                                         setAssigningId(assigningId === ticket.id ? null : ticket.id);
-                                     }}
+                                      }}
                                      className="flex items-center gap-2 px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors border border-slate-200"
                                    >
                                       <span className="text-xs font-bold text-slate-700">{ticket.assignedTo || 'Unassigned'}</span>
@@ -340,11 +396,24 @@ export default function AdminDashboard() {
                                      {ticket.status}
                                    </div>
                                 </div>
-                                <div 
-                                  className="flex items-center justify-center w-10 h-10 rounded-xl bg-slate-50 text-slate-300 group-hover:bg-primary group-hover:text-white transition-all"
-                                  onClick={() => navigate(`/admin/ticket/${ticket.id}`)}
-                                >
-                                   <ArrowUpRight size={18} />
+                                <div className="flex items-center gap-2">
+                                  <div 
+                                    className="flex items-center justify-center w-10 h-10 rounded-xl bg-slate-50 text-slate-300 group-hover:bg-primary group-hover:text-white transition-all"
+                                    onClick={() => navigate(`/admin/ticket/${ticket.id}`)}
+                                  >
+                                     <ArrowUpRight size={18} />
+                                  </div>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    className="w-10 h-10 rounded-xl text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteTicket(ticket.id);
+                                    }}
+                                  >
+                                     <Trash2 size={18} />
+                                  </Button>
                                 </div>
                              </div>
                           </motion.div>
@@ -389,6 +458,83 @@ export default function AdminDashboard() {
                        ))}
                     </div>
                   </div>
+                </>
+              ) : activeTab === 'feedback' ? (
+                <>
+                  <header className="mb-8">
+                    <h2 className="text-2xl font-bold text-slate-900 mb-1">Service Feedback</h2>
+                    <p className="text-slate-500 text-sm">Customer satisfaction metrics and latest reviews.</p>
+                  </header>
+                  
+                  {feedbackData && (
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Satisfactory Score</p>
+                            <div className="flex items-center gap-3">
+                               <p className="text-3xl font-black text-slate-900">{(feedbackData.stats.averageRating || 0).toFixed(1)}</p>
+                               <div className="flex gap-0.5 text-yellow-400">
+                                  {[1, 2, 3, 4, 5].map(s => (
+                                    <Star key={s} size={14} fill={feedbackData.stats.averageRating >= s ? 'currentColor' : 'none'} />
+                                  ))}
+                               </div>
+                            </div>
+                         </div>
+                         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Reviews</p>
+                            <p className="text-3xl font-black text-slate-900">{feedbackData.stats.totalRatings}</p>
+                         </div>
+                         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Completion Rate</p>
+                            <p className="text-3xl font-black text-slate-900">
+                               {feedbackData.stats.totalTickets ? Math.round((feedbackData.stats.totalRatings / feedbackData.stats.totalTickets) * 100) : 0}%
+                            </p>
+                         </div>
+                      </div>
+
+                      <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xl shadow-slate-200/50">
+                        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                           <h3 className="font-bold text-slate-800 text-sm uppercase tracking-tight">Recent Feedback</h3>
+                        </div>
+                        <div className="divide-y divide-slate-100">
+                           {feedbackData.latestFeedback.map((fb: any) => (
+                             <div key={fb.id} className="p-6 hover:bg-slate-50 transition-colors">
+                                <div className="flex items-start justify-between mb-3">
+                                   <div className="flex items-center gap-3">
+                                      <Avatar className="w-8 h-8 rounded-lg shrink-0">
+                                         <AvatarFallback className="bg-slate-200 text-[10px] font-bold">{fb.userName[0]}</AvatarFallback>
+                                      </Avatar>
+                                      <div>
+                                         <p className="text-sm font-bold text-slate-900">{fb.userName}</p>
+                                         <p className="text-[10px] text-slate-500 font-medium">Re: {fb.subject}</p>
+                                      </div>
+                                   </div>
+                                   <div className="flex gap-0.5 text-yellow-400">
+                                      {[1, 2, 3, 4, 5].map(s => (
+                                        <Star key={s} size={12} fill={fb.rating >= s ? 'currentColor' : 'none'} />
+                                      ))}
+                                   </div>
+                                </div>
+                                <div className="bg-slate-100/50 p-4 rounded-2xl relative">
+                                   <div className="absolute top-2 left-2 opacity-5">
+                                      <MessageSquareQuote size={40} />
+                                   </div>
+                                   <p className="text-xs text-slate-600 leading-relaxed font-medium relative z-10 italic">
+                                      "{fb.feedback || 'The customer didn\'t leave a comment.'}"
+                                   </p>
+                                </div>
+                             </div>
+                           ))}
+                           {feedbackData.latestFeedback.length === 0 && (
+                             <div className="p-12 text-center text-slate-400">
+                                <Star size={32} className="mx-auto mb-3 opacity-20" />
+                                <p className="text-xs font-bold uppercase tracking-widest">No feedback received yet</p>
+                             </div>
+                           )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="h-[400px] flex flex-col items-center justify-center text-slate-400 bg-white rounded-3xl border border-slate-200 border-dashed">

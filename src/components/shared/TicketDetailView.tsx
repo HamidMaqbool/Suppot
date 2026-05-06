@@ -20,7 +20,8 @@ import {
   FileText,
   X,
   MessageSquareQuote,
-  Activity
+  Activity,
+  Star
 } from 'lucide-react';
 import { MOCK_TICKETS, MOCK_MESSAGES, MOCK_USERS } from '../../constants';
 import { Message, Ticket } from '../../types';
@@ -63,11 +64,31 @@ export default function TicketDetailView({ portal }: Props) {
   const [showTags, setShowTags] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [ticketAttachments, setTicketAttachments] = useState<any[]>([]);
+  const [rating, setRating] = useState<number>(0);
+  const [feedback, setFeedback] = useState('');
+  const [submittingFeedback, setSubmittingFeedback] = useState(false);
+  const [isFocused, setIsFocused] = useState(true);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const socket = getSocket();
   const typingTimeoutRef = useRef<NodeJS.Timeout|null>(null);
+
+  const playSound = () => {
+    const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
+    audio.play().catch(() => {});
+  };
+
+  useEffect(() => {
+    const handleFocus = () => setIsFocused(true);
+    const handleBlur = () => setIsFocused(false);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -140,6 +161,7 @@ export default function TicketDetailView({ portal }: Props) {
       if (msg.ticketId === id) {
         setMessages(prev => {
           if (prev.find(m => m.id === msg.id)) return prev;
+          if (!document.hasFocus()) playSound();
           return [...prev, msg];
         });
       }
@@ -263,6 +285,32 @@ export default function TicketDetailView({ portal }: Props) {
     }
   };
 
+  const handleSubmitFeedback = async () => {
+    if (!rating) return;
+    setSubmittingFeedback(true);
+    try {
+      const res = await fetch(`/api/tickets/${id}/feedback`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ rating, feedback })
+      });
+      if (res.ok) {
+        toast.success('Thank you for your feedback!');
+        setTicket(prev => prev ? { ...prev, rating, feedback } : null);
+      } else {
+        toast.error('Failed to submit feedback');
+      }
+    } catch (err) {
+      console.error('Feedback submission error:', err);
+      toast.error('Connection error');
+    } finally {
+      setSubmittingFeedback(false);
+    }
+  };
+
   const handleResolveTicket = async () => {
     try {
       const res = await fetch(`/api/tickets/${id}/status`, {
@@ -283,6 +331,28 @@ export default function TicketDetailView({ portal }: Props) {
       }
     } catch (err) {
       console.error('Resolve error:', err);
+      toast.error('Connection error');
+    }
+  };
+
+  const handleReopenTicket = async () => {
+    try {
+      const res = await fetch(`/api/tickets/${id}/reopen`, {
+        method: 'PATCH',
+        headers: { 
+          'Authorization': `Bearer ${token}` 
+        }
+      });
+
+      if (res.ok) {
+        toast.success('Ticket reopened');
+        setTicket(prev => prev ? { ...prev, status: 'open' } : null);
+      } else {
+        const errorData = await res.json();
+        toast.error(errorData.message || 'Failed to reopen ticket');
+      }
+    } catch (err) {
+      console.error('Reopen error:', err);
       toast.error('Connection error');
     }
   };
@@ -381,18 +451,26 @@ export default function TicketDetailView({ portal }: Props) {
                           {msg.content}
                           {msg.attachments && msg.attachments.length > 0 && (
                             <div className="mt-3 flex flex-wrap gap-2">
-                               {msg.attachments.map((file, idx) => (
-                                 <div key={idx} className={`flex items-center gap-2 p-2 rounded-lg text-xs ${isMe ? 'bg-white/10' : 'bg-slate-50 border border-slate-100'}`}>
-                                    <FileText size={14} />
-                                    {file.startsWith('/') ? (
-                                      <a href={file} target="_blank" rel="noopener noreferrer" className="hover:underline flex-1 truncate max-w-[150px]">
-                                        {file.split('-').pop() || file}
-                                      </a>
-                                    ) : (
-                                      <span className="flex-1 truncate max-w-[150px]">{file}</span>
-                                    )}
-                                 </div>
-                               ))}
+                               {msg.attachments.map((file, idx) => {
+                                 const isImage = typeof file === 'string' && /\.(jpg|jpeg|png|gif|webp)$/i.test(file);
+                                 return (
+                                   <div key={idx} className={`flex flex-col gap-2 p-2 rounded-lg text-xs ${isMe ? 'bg-white/10' : 'bg-slate-50 border border-slate-100'}`}>
+                                      {isImage && (
+                                        <img src={file} alt="preview" className="max-w-[200px] max-h-[150px] rounded object-cover cursor-pointer hover:opacity-90 transition-opacity" onClick={() => window.open(file, '_blank')} />
+                                      )}
+                                      <div className="flex items-center gap-2">
+                                        <FileText size={14} />
+                                        {typeof file === 'string' && file.startsWith('/') ? (
+                                          <a href={file} target="_blank" rel="noopener noreferrer" className="hover:underline flex-1 truncate max-w-[150px]">
+                                             {file.split('-').pop() || file}
+                                          </a>
+                                        ) : (
+                                          <span className="flex-1 truncate max-w-[150px]">{file}</span>
+                                        )}
+                                      </div>
+                                   </div>
+                                 );
+                               })}
                             </div>
                           )}
                         </div>
@@ -417,6 +495,61 @@ export default function TicketDetailView({ portal }: Props) {
               >
                  <Activity size={12} className="animate-pulse text-primary" /> 
                  {portal === 'user' ? 'Support Agent ' : 'Customer '} is typing...
+              </motion.div>
+            )}
+
+            {ticket?.status === 'resolved' && portal === 'user' && !ticket.rating && (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mx-auto max-w-lg bg-white border border-slate-200 rounded-[2.5rem] p-8 text-center shadow-xl shadow-slate-200/50 my-12"
+              >
+                <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                   <Star size={32} fill="currentColor" />
+                </div>
+                <h3 className="text-xl font-black text-slate-900 mb-2 tracking-tight">Rate your experience</h3>
+                <p className="text-slate-500 text-sm mb-8 font-medium">How helpful was our response today?</p>
+                
+                <div className="flex justify-center gap-6 mb-8 py-4">
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="flex justify-center gap-3">
+                      {[1, 2, 3, 4, 5].map(star => (
+                        <button 
+                          key={star}
+                          onClick={() => setRating(star)}
+                          className={`w-12 h-12 rounded-2xl transition-all duration-300 transform hover:scale-110 ${rating >= star ? 'bg-yellow-400 text-white shadow-lg shadow-yellow-200' : 'bg-slate-50 text-slate-300 hover:bg-slate-100'}`}
+                        >
+                          <Star size={24} fill={rating >= star ? 'currentColor' : 'none'} className={rating >= star ? 'animate-in zoom-in-50 duration-300' : ''} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <textarea 
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  placeholder="Any additional comments?"
+                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm focus:ring-4 focus:ring-primary/5 focus:border-primary/20 outline-none transition-all mb-4 min-h-[100px] resize-none font-medium"
+                />
+                
+                <div className="flex flex-col gap-3">
+                  <Button 
+                    onClick={handleSubmitFeedback}
+                    disabled={!rating || submittingFeedback}
+                    className="w-full h-14 rounded-[1.25rem] bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm tracking-tight transition-all active:scale-95 disabled:opacity-50"
+                  >
+                     {submittingFeedback ? 'Submitting...' : 'Submit Feedback & Close Ticket'}
+                  </Button>
+                  
+                  <Button 
+                    variant="ghost"
+                    onClick={handleReopenTicket}
+                    className="text-slate-400 hover:text-slate-600 font-bold text-xs uppercase tracking-widest"
+                  >
+                    Not satisfied? Reopen Ticket
+                  </Button>
+                </div>
               </motion.div>
             )}
           </div>
@@ -482,7 +615,8 @@ export default function TicketDetailView({ portal }: Props) {
                   </div>
                 )}
                 <Textarea 
-                  placeholder={`Reply as ${portal === 'user' ? 'Customer' : 'Support Specialist'}...`}
+                  placeholder={ticket.rating ? "Ticket is finalized. Feedback submitted." : `Reply as ${portal === 'user' ? 'Customer' : 'Support Specialist'}...`}
+                  readOnly={!!ticket.rating}
                   className="bg-transparent border-none focus-visible:ring-0 min-h-[120px] resize-none pb-12"
                   value={newMessage}
                   onChange={(e) => onTyping(e.target.value)}
@@ -499,6 +633,7 @@ export default function TicketDetailView({ portal }: Props) {
                       <Button 
                         variant="ghost" 
                         size="icon" 
+                        disabled={!!ticket.rating}
                         className="w-9 h-9 text-slate-400 hover:text-primary rounded-xl"
                         onClick={() => fileInputRef.current?.click()}
                       >
@@ -508,6 +643,7 @@ export default function TicketDetailView({ portal }: Props) {
                         <Button 
                           variant="ghost" 
                           size="icon" 
+                          disabled={!!ticket.rating}
                           className={`w-9 h-9 rounded-xl transition-colors ${showCanned ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:text-primary'}`}
                           onClick={() => setShowCanned(!showCanned)}
                         >
@@ -518,6 +654,7 @@ export default function TicketDetailView({ portal }: Props) {
                          <Button 
                            variant="ghost" 
                            size="icon" 
+                           disabled={!!ticket.rating}
                            className={`w-9 h-9 rounded-xl transition-colors ${showTags ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:text-primary'}`}
                            onClick={() => setShowTags(!showTags)}
                          >
@@ -645,7 +782,7 @@ export default function TicketDetailView({ portal }: Props) {
                         </div>
                         <div className="min-w-0">
                            <p className="text-[10px] font-bold text-slate-900 group-hover:text-primary truncate">{file.fileName}</p>
-                           <p className="text-[9px] text-slate-400">{(file.fileSize / 1024).toFixed(1)} KB • {file.fileType.split('/')[1].toUpperCase()}</p>
+                           <p className="text-[9px] text-slate-400">{(file.fileSize / 1024).toFixed(1)} KB • {file.fileType?.split('/')?.[1]?.toUpperCase() || 'FILE'}</p>
                         </div>
                      </a>
                    )) : (
