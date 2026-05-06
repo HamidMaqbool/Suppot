@@ -706,7 +706,30 @@ export default function TicketDetailView({ portal }: Props) {
           </div>
         </div>
 
-        {!(ticket?.rating) && !(portal === 'user' && ticket?.status === 'resolved') && (
+        {ticket?.status === 'resolved' ? (
+          <div className="p-12 text-center bg-slate-50/50 flex flex-col items-center justify-center space-y-4 shrink-0 border-t border-slate-200">
+            <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-2">
+              <CheckCircle2 size={32} />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-slate-900">Ticket Resolved</h3>
+              <p className="text-sm text-slate-500 max-w-xs mx-auto">
+                {ticket.rating 
+                  ? "The customer has provided feedback for this ticket." 
+                  : "Waiting for the customer to provide feedback on this case."}
+              </p>
+            </div>
+            {portal === 'admin' && (
+              <Button 
+                variant="outline"
+                onClick={handleReopenTicket}
+                className="mt-4 border-slate-200 text-slate-600 rounded-xl font-bold text-xs uppercase tracking-widest px-8 h-10 hover:bg-slate-100 transition-all"
+              >
+                Re-open Ticket
+              </Button>
+            )}
+          </div>
+        ) : (
           <div className="p-6 bg-white border-t border-slate-200 z-10 shrink-0">
             <div className="max-w-4xl mx-auto space-y-4">
                {replyingTo && (
