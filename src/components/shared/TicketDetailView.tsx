@@ -716,131 +716,102 @@ export default function TicketDetailView({ portal }: Props) {
               </motion.div>
             )}
 
-            {ticket.rating && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mx-auto max-w-md bg-white border border-slate-100 rounded-3xl p-6 shadow-sm flex flex-col items-center text-center space-y-4"
-              >
-                <div className="flex gap-1">
-                  {[1, 2, 3, 4, 5].map(s => (
-                    <Star key={s} size={20} fill={s <= ticket.rating ? '#fbbf24' : 'none'} className={s <= ticket.rating ? 'text-yellow-400' : 'text-slate-200'} />
-                  ))}
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-slate-900 mb-1">Feedback Submitted</p>
-                  <p className="text-xs text-slate-500 italic">"{ticket.feedback}"</p>
-                </div>
-                {portal === 'user' && (
-                  <Button 
-                    onClick={() => setIsNewTicketOpen(true)}
-                    className="bg-primary text-white rounded-xl font-bold text-xs uppercase tracking-widest px-6"
-                  >
-                    Create New Ticket
-                  </Button>
-                )}
-                {portal === 'admin' && (
-                  <Button 
-                    variant="outline"
-                    onClick={handleReopenTicket}
-                    className="border-slate-200 text-slate-600 rounded-xl font-bold text-xs uppercase tracking-widest px-6"
-                  >
-                    Re-open Ticket
-                  </Button>
-                )}
-              </motion.div>
-            )}
-
-            {ticket?.status === 'resolved' && portal === 'user' && !ticket.rating && (
+            {ticket?.status === 'resolved' && (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="mx-auto max-w-lg bg-white border border-slate-200 rounded-[2.5rem] p-8 text-center shadow-xl shadow-slate-200/50 my-12"
               >
-                <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                   <Star size={32} fill="currentColor" />
-                </div>
-                <h3 className="text-xl font-black text-slate-900 mb-2 tracking-tight">Rate your experience</h3>
-                <p className="text-slate-500 text-sm mb-8 font-medium">How helpful was our response today?</p>
-                
-                <div className="flex justify-center gap-2 mb-8 py-4">
-                  {[1, 2, 3, 4, 5].map(star => (
-                    <button 
-                      key={star}
-                      onClick={() => setRating(star)}
-                      className={`w-12 h-12 rounded-2xl transition-all duration-300 transform hover:scale-110 flex items-center justify-center ${rating >= star ? 'bg-yellow-400 text-white shadow-lg shadow-yellow-200' : 'bg-slate-50 text-slate-300 hover:bg-slate-100'}`}
-                    >
-                      <Star size={24} fill={rating >= star ? 'currentColor' : 'none'} className={rating >= star ? 'animate-in zoom-in-50 duration-300' : ''} />
-                    </button>
-                  ))}
-                </div>
+                {portal === 'user' && !ticket.rating ? (
+                  <>
+                    <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                       <Star size={32} fill="currentColor" />
+                    </div>
+                    <h3 className="text-xl font-black text-slate-900 mb-2 tracking-tight">Rate your experience</h3>
+                    <p className="text-slate-500 text-sm mb-8 font-medium">How helpful was our response today?</p>
+                    
+                    <div className="flex justify-center gap-2 mb-8 py-4">
+                      {[1, 2, 3, 4, 5].map(star => (
+                        <button 
+                          key={star}
+                          onClick={() => setRating(star)}
+                          className={`w-12 h-12 rounded-2xl transition-all duration-300 transform hover:scale-110 flex items-center justify-center ${rating >= star ? 'bg-yellow-400 text-white shadow-lg shadow-yellow-200' : 'bg-slate-50 text-slate-300 hover:bg-slate-100'}`}
+                        >
+                          <Star size={24} fill={rating >= star ? 'currentColor' : 'none'} className={rating >= star ? 'animate-in zoom-in-50 duration-300' : ''} />
+                        </button>
+                      ))}
+                    </div>
 
-                <textarea 
-                  value={feedback}
-                  onChange={(e) => setFeedback(e.target.value)}
-                  placeholder="Any additional comments?"
-                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm focus:ring-4 focus:ring-primary/5 focus:border-primary/20 outline-none transition-all mb-4 min-h-[100px] resize-none font-medium"
-                />
-                
-                <div className="flex flex-col gap-3">
-                  <Button 
-                    onClick={handleSubmitFeedback}
-                    disabled={!rating || submittingFeedback}
-                    className="w-full h-14 rounded-[1.25rem] bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm tracking-tight transition-all active:scale-95 disabled:opacity-50"
-                  >
-                     {submittingFeedback ? 'Submitting...' : 'Submit Feedback & Close Ticket'}
-                  </Button>
-                  
-                  <Button 
-                    variant="ghost"
-                    onClick={handleReopenTicket}
-                    className="text-slate-400 hover:text-slate-600 font-bold text-xs uppercase tracking-widest"
-                  >
-                    Not satisfied? Reopen Ticket
-                  </Button>
-                </div>
+                    <textarea 
+                      value={feedback}
+                      onChange={(e) => setFeedback(e.target.value)}
+                      placeholder="Any additional comments?"
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm focus:ring-4 focus:ring-primary/5 focus:border-primary/20 outline-none transition-all mb-4 min-h-[100px] resize-none font-medium"
+                    />
+                    
+                    <div className="flex flex-col gap-3">
+                      <Button 
+                        onClick={handleSubmitFeedback}
+                        disabled={!rating || submittingFeedback}
+                        className="w-full h-14 rounded-[1.25rem] bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm tracking-tight transition-all active:scale-95 disabled:opacity-50"
+                      >
+                         {submittingFeedback ? 'Submitting...' : 'Submit Feedback & Close Ticket'}
+                      </Button>
+                      
+                      <Button 
+                        variant="ghost"
+                        onClick={handleReopenTicket}
+                        className="text-slate-400 hover:text-slate-600 font-bold text-xs uppercase tracking-widest"
+                      >
+                        Not satisfied? Reopen Ticket
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-16 h-16 bg-green-100 text-green-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                      <CheckCircle2 size={32} />
+                    </div>
+                    <div className="space-y-2 mb-8">
+                      <h3 className="text-xl font-bold text-slate-900 tracking-tight">Ticket Resolved</h3>
+                      <p className="text-xs text-slate-500 max-w-xs leading-relaxed font-medium mx-auto">
+                        {ticket.rating 
+                          ? `Feedback: "${ticket.feedback}"` 
+                          : "Waiting for the customer to provide feedback on this case."}
+                      </p>
+                      {ticket.rating && (
+                        <div className="flex justify-center gap-1 mt-4">
+                          {[1, 2, 3, 4, 5].map(s => (
+                            <Star key={s} size={20} fill={s <= ticket.rating! ? '#fbbf24' : 'none'} className={s <= ticket.rating! ? 'text-yellow-400' : 'text-slate-200'} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {portal === 'admin' && (
+                      <Button 
+                        variant="outline"
+                        onClick={handleReopenTicket}
+                        className="w-full h-12 border-slate-200 text-slate-600 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all font-mono"
+                      >
+                        Re-open Ticket
+                      </Button>
+                    )}
+                    {portal === 'user' && ticket.rating && (
+                      <Button 
+                        onClick={() => setIsNewTicketOpen(true)}
+                        className="w-full h-12 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold text-xs uppercase tracking-widest transition-all"
+                      >
+                        Create New Ticket
+                      </Button>
+                    )}
+                  </>
+                )}
               </motion.div>
             )}
           </div>
         </div>
 
-        {ticket?.status === 'resolved' ? (
-          <div className="p-8 bg-white border-t border-slate-200 z-10 shrink-0">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="mx-auto max-w-md bg-white border border-slate-100 rounded-3xl p-8 shadow-sm flex flex-col items-center text-center space-y-6"
-            >
-              <div className="w-16 h-16 bg-green-100 text-green-600 rounded-2xl flex items-center justify-center">
-                <CheckCircle2 size={32} />
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-lg font-bold text-slate-900 tracking-tight">Ticket Resolved</h3>
-                <p className="text-xs text-slate-500 max-w-xs leading-relaxed font-medium">
-                  {ticket.rating 
-                    ? `Feedback: "${ticket.feedback}"` 
-                    : "Waiting for the customer to provide feedback on this case."}
-                </p>
-                {ticket.rating && (
-                  <div className="flex justify-center gap-1 mt-2">
-                    {[1, 2, 3, 4, 5].map(s => (
-                      <Star key={s} size={16} fill={s <= ticket.rating! ? '#fbbf24' : 'none'} className={s <= ticket.rating! ? 'text-yellow-400' : 'text-slate-200'} />
-                    ))}
-                  </div>
-                )}
-              </div>
-              {portal === 'admin' && (
-                <Button 
-                  variant="outline"
-                  onClick={handleReopenTicket}
-                  className="w-full h-11 border-slate-200 text-slate-600 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all font-mono"
-                >
-                  Re-open Ticket
-                </Button>
-              )}
-            </motion.div>
-          </div>
-        ) : (
+        {ticket?.status !== 'resolved' && (
           <div className="p-6 bg-white border-t border-slate-200 z-10 shrink-0">
             <div className="max-w-4xl mx-auto space-y-4">
                {replyingTo && (
